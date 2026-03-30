@@ -1,0 +1,1497 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+}
+
+model api_error {
+  id_api_error   BigInt       @id(map: "PK__api_erro__A78D87CC04850FF9") @default(autoincrement())
+  staktrace      String       @db.VarChar(Max)
+  id_institucion Int?
+  fecha          DateTime     @db.DateTime
+  institucion    institucion? @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__api_error__id_in__53D770D6")
+}
+
+model Autenticacion {
+  Id             Int      @id(map: "PK_Autenticacion") @default(autoincrement())
+  IdUsuario      BigInt
+  Fecha          DateTime @db.DateTime
+  Codigo         Int
+  UserAgent      String   @db.VarChar(500)
+  CodigoValidado Int
+}
+
+model AutenticacionConfig {
+  Id           Int @id(map: "PK_AutenticacionConfig")
+  IntervaloDia Int
+  Valida       Int
+}
+
+model AutenticacionLog {
+  Id            Int      @id(map: "PK_AutenticacionLog") @default(autoincrement())
+  IdUsuario     BigInt
+  Fecha         DateTime @db.DateTime
+  Codigo        Int
+  UserAgent     String   @db.VarChar(500)
+  FechaRegistro DateTime @db.DateTime
+}
+
+model ComentarioGeneralTag {
+  Id                Int      @id(map: "PK_ComentarioGeneralTag") @default(autoincrement())
+  IdExamen          BigInt
+  ComentarioGeneral String   @db.VarChar(Max)
+  Usuario           String   @db.VarChar(150)
+  Fecha             DateTime @db.DateTime
+}
+
+model configuracion_general {
+  id_configuracion_general BigInt @id(map: "PK__configur__08926F7D66D5E6CB") @default(autoincrement())
+  nombre                   String @db.VarChar(250)
+  descripcion              String @db.VarChar(250)
+  estado                   Int
+  valor1                   String @db.VarChar(500)
+  valor2                   String @db.VarChar(500)
+}
+
+model estado_addendum {
+  id_estado_addendum Int                  @id(map: "PK__estado_a__B678229A84C1D55C") @default(autoincrement())
+  nombre             String               @db.VarChar(250)
+  solicitud_addendum solicitud_addendum[]
+}
+
+model estado_sincronizacion {
+  id_estado_sincronizacion Int     @id(map: "PK__estado_s__EACD0A1D2FE74DFB") @default(autoincrement())
+  nombre                   String? @db.VarChar(255)
+}
+
+model ExamenTag {
+  Id              Int      @id(map: "PK_ExamenTag") @default(autoincrement())
+  IdExamen        BigInt
+  IdTagExamen     Int
+  FechaCreacion   DateTime @db.DateTime
+  UsuarioCreacion String   @db.VarChar(150)
+}
+
+model filtro {
+  id_filtro            BigInt                 @id(map: "PK__filtro__F613DF626021E903") @default(autoincrement())
+  nombre               String                 @db.VarChar(250)
+  id_estado            Int
+  veces_usado          BigInt
+  fecha_ultimo_uso     DateTime               @db.DateTime
+  tipo_filtro          String?                @db.VarChar(50)
+  filtro_estado        filtro_estado[]
+  filtro_institucion   filtro_institucion[]
+  filtro_modalidad     filtro_modalidad[]
+  filtro_tipo_urgencia filtro_tipo_urgencia[]
+}
+
+model filtro_estado {
+  id_filtro_estado  BigInt             @id(map: "PK__filtro_e__6BF282E2C098521E") @default(autoincrement())
+  id_estado_examen  Int?
+  id_filtro         BigInt?
+  ris_estado_examen ris_estado_examen? @relation(fields: [id_estado_examen], references: [id_estado_examen], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_es__id_es__55BFB948")
+  filtro            filtro?            @relation(fields: [id_filtro], references: [id_filtro], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_es__id_fi__56B3DD81")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model filtro_estado_informe {
+  id_filtro_estado_informe BigInt  @default(autoincrement())
+  id_estado_informe        Int?
+  id_filtro                BigInt?
+
+  @@ignore
+}
+
+model filtro_institucion {
+  id_filtro_institucion BigInt       @id(map: "PK__filtro_i__DC0229CD03D7AF55") @default(autoincrement())
+  id_institucion        Int?
+  id_filtro             BigInt?
+  filtro                filtro?      @relation(fields: [id_filtro], references: [id_filtro], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_in__id_fi__57A801BA")
+  institucion           institucion? @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_in__id_in__589C25F3")
+}
+
+model filtro_modalidad {
+  id_filtro_modalidad BigInt     @id(map: "PK__filtro_m__8645D8808E7D62BB") @default(autoincrement())
+  id_modalidad        Int?
+  id_filtro           BigInt?
+  filtro              filtro?    @relation(fields: [id_filtro], references: [id_filtro], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_mo__id_fi__59904A2C")
+  modalidad           modalidad? @relation(fields: [id_modalidad], references: [id_modalidad], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_mo__id_mo__5A846E65")
+}
+
+model filtro_tipo_urgencia {
+  id_filtro_tipo_urgencia BigInt         @id(map: "PK__filtro_t__4738B2488C016F90") @default(autoincrement())
+  id_tipo_urgencia        Int?
+  id_filtro               BigInt?
+  filtro                  filtro?        @relation(fields: [id_filtro], references: [id_filtro], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_ti__id_fi__5B78929E")
+  tipo_urgencia           tipo_urgencia? @relation(fields: [id_tipo_urgencia], references: [id_tipo_urgencia], onDelete: NoAction, onUpdate: NoAction, map: "FK__filtro_ti__id_ti__5C6CB6D7")
+}
+
+model filtro_usuario {
+  id_filtro_usuario BigInt  @id(map: "PK__filtro_u__BB38DD0DD56A3C5B") @default(autoincrement())
+  id_usuario        BigInt
+  id_filtro         BigInt
+  usuario           usuario @relation(fields: [id_usuario], references: [id_usuario], onUpdate: NoAction, map: "FK__filtro_us__id_us__5D60DB10")
+}
+
+model filtro_usuario_asignado {
+  id         Int    @id(map: "PK_filtro_usuario_asignado") @default(autoincrement())
+  id_filtro  BigInt
+  id_usuario BigInt
+}
+
+model institucion {
+  id_institucion                    Int                                 @id(map: "PK_institucion") @default(autoincrement())
+  nombre                            String                              @db.VarChar(100)
+  descripcion                       String                              @db.VarChar(250)
+  estado                            Int
+  url_pagina                        String?                             @db.VarChar(250)
+  aetitle                           String?                             @unique(map: "UQ__instituc__3B989028293635CC") @db.VarChar(25)
+  url_descarga                      String                              @db.VarChar(250)
+  url_informe                       String                              @db.VarChar(250)
+  url_base                          String                              @db.VarChar(250)
+  id_tipo_conexion                  Int
+  addendum                          Int
+  formulario_unico                  Int
+  url_informe_oit                   String                              @db.VarChar(250)
+  id_institucion_padre              Int
+  logo                              String                              @db.VarChar(250)
+  estructura                        String                              @db.VarChar(Max)
+  margen_superior                   Int
+  margen_inferior                   Int
+  margen_izquierda                  Int
+  margen_derecha                    Int
+  codigo_qr                         String                              @db.VarChar(250)
+  id_tipo_becado                    Int
+  id_grupo                          Int
+  correo_patologia_critica          String                              @db.VarChar(1000)
+  correo_cc_patologia_critica       String                              @db.VarChar(1000)
+  flagObtenerComentarios            Int?
+  url_wsInstitucion                 String?                             @db.VarChar(250)
+  flag_contingencia                 Int?
+  correo_patologia_grave            String?                             @db.VarChar(150)
+  correo_cc_patologia_grave         String?                             @db.VarChar(2000)
+  estructura_oit                    String?                             @db.VarChar(Max)
+  EsSoran                           Int?
+  rut_institucion                   String?                             @db.VarChar(50)
+  razon_social                      String?                             @db.VarChar(250)
+  CORREO_PENDIENTE                  String?                             @db.VarChar(500)
+  Tipo_contrato                     String?                             @db.VarChar(500)
+  pack_standard_oit                 String?                             @db.VarChar(255)
+  Empresa_Facturacion               String?                             @db.VarChar(10)
+  telefono_fijo                     String?                             @db.VarChar(15)
+  telefono_movil                    String?                             @db.VarChar(15)
+  api_error                         api_error[]
+  filtro_institucion                filtro_institucion[]
+  tipo_becado                       tipo_becado                         @relation(fields: [id_tipo_becado], references: [id_tipo_becado], onUpdate: NoAction, map: "FK__instituci__id_ti__414EAC47")
+  tipo_conexion                     tipo_conexion                       @relation(fields: [id_tipo_conexion], references: [id_tipo_conexion], onUpdate: NoAction, map: "FK__instituci__id_ti__5F492382")
+  institucion_credenciales          institucion_credenciales[]
+  institucion_datos                 institucion_datos[]
+  institucion_visor                 institucion_visor[]
+  meddreams                         meddreams[]
+  ris_examen                        ris_examen[]
+  ris_examen_prestacion             ris_examen_prestacion[]
+  ris_informe                       ris_informe[]
+  ris_informe_dato                  ris_informe_dato[]
+  ris_informe_prestacion            ris_informe_prestacion[]
+  ris_institucion_patologia_critica ris_institucion_patologia_critica[]
+  ris_instituciones_tiempobkp       ris_instituciones_tiempobkp[]
+  ris_orden_examen                  ris_orden_examen[]
+  ris_patologia_critica             ris_patologia_critica[]
+  ris_prestacion                    ris_prestacion[]
+  usuario_institucion               usuario_institucion[]
+
+  @@index([aetitle], map: "institucion_aetitle")
+}
+
+model institucion_credenciales {
+  id_institucion_credenciales Int         @id(map: "PK__instituc__E7628DAC0C90E1E0") @default(autoincrement())
+  username                    String      @db.VarChar(250)
+  password                    String      @db.VarChar(250)
+  estado                      Int
+  id_institucion              Int
+  vector                      String      @db.VarChar(250)
+  institucion                 institucion @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__instituci__id_in__756D6ECB")
+}
+
+model institucion_datos {
+  id_institucion_datos BigInt       @id(map: "PK__instituc__D8A61C8AED835C53") @default(autoincrement())
+  id_institucion       Int?
+  id_metodo            Int?
+  nombre               String       @db.VarChar(250)
+  url                  String       @db.VarChar(250)
+  metodo               String       @db.VarChar(250)
+  institucion          institucion? @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__instituci__id_in__61316BF4")
+  metodo_rel           metodo?      @relation(fields: [id_metodo], references: [id_metodo], onDelete: NoAction, onUpdate: NoAction, map: "FK__instituci__id_me__6225902D")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model institucion_old2 {
+  id_institucion              Int     @default(autoincrement())
+  nombre                      String  @db.VarChar(100)
+  descripcion                 String  @db.VarChar(250)
+  estado                      Int
+  url_pagina                  String? @db.VarChar(250)
+  aetitle                     String? @db.VarChar(25)
+  url_descarga                String  @db.VarChar(250)
+  url_informe                 String  @db.VarChar(250)
+  url_base                    String  @db.VarChar(250)
+  id_tipo_conexion            Int
+  addendum                    Int
+  formulario_unico            Int
+  url_informe_oit             String  @db.VarChar(250)
+  id_institucion_padre        Int
+  logo                        String  @db.VarChar(250)
+  estructura                  String  @db.VarChar(Max)
+  margen_superior             Int
+  margen_inferior             Int
+  margen_izquierda            Int
+  margen_derecha              Int
+  codigo_qr                   String  @db.VarChar(250)
+  id_tipo_becado              Int
+  id_grupo                    Int
+  correo_patologia_critica    String  @db.VarChar(1000)
+  correo_cc_patologia_critica String  @db.VarChar(1000)
+  flagObtenerComentarios      Int?
+  url_wsInstitucion           String? @db.VarChar(250)
+  flag_contingencia           Int?
+  correo_patologia_grave      String? @db.VarChar(150)
+  correo_cc_patologia_grave   String? @db.VarChar(2000)
+  estructura_oit              String? @db.VarChar(Max)
+  EsSoran                     Int?
+  rut_institucion             String? @db.VarChar(50)
+  razon_social                String? @db.VarChar(250)
+  CORREO_PENDIENTE            String? @db.VarChar(500)
+  Tipo_contrato               String? @db.VarChar(500)
+  pack_standard_oit           String? @db.VarChar(255)
+  Empresa_Facturacion         String? @db.VarChar(10)
+  telefono_fijo               String? @db.VarChar(15)
+  telefono_movil              String? @db.VarChar(15)
+
+  @@ignore
+}
+
+model institucion_visor {
+  id_institucion_visor Int         @id(map: "PK__instituc__36C1DEE88C910394") @default(autoincrement())
+  id_visor             Int
+  id_institucion       Int
+  url                  String      @db.VarChar(500)
+  id_estado            Int
+  institucion          institucion @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__instituci__id_in__6319B466")
+  visor                visor       @relation(fields: [id_visor], references: [id_visor], onUpdate: NoAction, map: "FK__instituci__id_vi__640DD89F")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model institucionOLDBKP {
+  id_institucion              Int     @default(autoincrement())
+  nombre                      String  @db.VarChar(100)
+  descripcion                 String  @db.VarChar(250)
+  estado                      Int
+  url_pagina                  String? @db.VarChar(250)
+  aetitle                     String? @db.VarChar(25)
+  url_descarga                String  @db.VarChar(250)
+  url_informe                 String  @db.VarChar(250)
+  url_base                    String  @db.VarChar(250)
+  id_tipo_conexion            Int
+  addendum                    Int
+  formulario_unico            Int
+  url_informe_oit             String  @db.VarChar(250)
+  id_institucion_padre        Int
+  logo                        String  @db.VarChar(250)
+  estructura                  String  @db.VarChar(Max)
+  margen_superior             Int
+  margen_inferior             Int
+  margen_izquierda            Int
+  margen_derecha              Int
+  codigo_qr                   String  @db.VarChar(250)
+  id_tipo_becado              Int
+  id_grupo                    Int
+  correo_patologia_critica    String  @db.VarChar(1000)
+  correo_cc_patologia_critica String  @db.VarChar(1000)
+  flagObtenerComentarios      Int?
+  url_wsInstitucion           String? @db.VarChar(250)
+  flag_contingencia           Int?
+  correo_patologia_grave      String? @db.VarChar(150)
+  correo_cc_patologia_grave   String? @db.VarChar(2000)
+  estructura_oit              String? @db.VarChar(Max)
+  EsSoran                     Int?
+  rut_institucion             String? @db.VarChar(50)
+  razon_social                String? @db.VarChar(250)
+  CORREO_PENDIENTE            String? @db.VarChar(500)
+  Tipo_contrato               String? @db.VarChar(500)
+  pack_standard_oit           String? @db.VarChar(255)
+  Empresa_Facturacion         String? @db.VarChar(10)
+  telefono_fijo               String? @db.VarChar(15)
+  telefono_movil              String? @db.VarChar(15)
+
+  @@ignore
+}
+
+model log_control_acceso {
+  id         BigInt   @id(map: "PK_log_control_acceso") @default(autoincrement())
+  usuario    String   @db.VarChar(150)
+  nombre     String   @db.VarChar(350)
+  perfil     Int
+  fecha      DateTime @db.DateTime
+  user_agent String   @db.VarChar(500)
+  ip_cliente String   @db.VarChar(50)
+}
+
+model log_crm {
+  id        BigInt  @id(map: "PK_log_crm") @default(autoincrement())
+  contenido String? @db.VarChar(Max)
+}
+
+model log_lectura_examen {
+  Id         Int        @id(map: "PK_log_lectura_examen") @default(autoincrement())
+  Fecha      DateTime   @db.DateTime
+  IdUsuario  BigInt
+  IdExamen   BigInt
+  ris_examen ris_examen @relation(fields: [IdExamen], references: [id_ris_examen], onUpdate: NoAction, map: "FK_log_lectura_examen_log_ris_examen")
+  usuario    usuario    @relation(fields: [IdUsuario], references: [id_usuario], onUpdate: NoAction, map: "FK_log_lectura_examen_usuario")
+}
+
+model log_mig {
+  id          Int      @id(map: "PK_temp_log_mig") @default(autoincrement())
+  codexamen   String   @db.VarChar(500)
+  fecha       DateTime @db.DateTime
+  idpaciente  String   @db.VarChar(50)
+  iddocumento String   @db.VarChar(50)
+  id_examen   BigInt
+}
+
+model LogMeddreams {
+  IdLogMeddreams  Int      @id(map: "PK_LogMeddreams") @default(autoincrement())
+  Usuario         String   @db.VarChar(150)
+  Fecha           DateTime @db.DateTime
+  CodExamen       String   @db.VarChar(250)
+  IdPaciente      String   @db.VarChar(50)
+  NombrePaciente  String   @db.VarChar(150)
+  TipoAtencion    String   @db.VarChar(50)
+  EsInformeActual Int
+  FechaExamen     DateTime @db.DateTime
+  FechaAsignacion DateTime @db.DateTime
+}
+
+model LogReaperturaExamen {
+  Id             Int      @id(map: "PK_LogReaperturaExamen") @default(autoincrement())
+  IdExamen       Int
+  CodExamen      String   @db.VarChar(250)
+  IdPaciente     String   @db.VarChar(50)
+  NombrePaciente String   @db.VarChar(150)
+  IdUsuario      Int
+  NombreUsuario  String   @db.VarChar(50)
+  Operacion      String   @db.Text
+  FechaOperacion DateTime @db.DateTime
+}
+
+model meddreams {
+  id_meddreams   Int         @id(map: "PK__meddream__5A2191C0817E433E") @default(autoincrement())
+  id_institucion Int
+  url            String      @db.VarChar(250)
+  json           String      @db.VarChar(Max)
+  method         String      @db.VarChar(50)
+  id_estado      Int
+  institucion    institucion @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__meddreams__id_in__6501FCD8")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model menu {
+  id_menu Int      @default(autoincrement())
+  Nombre  String?  @db.VarChar(250)
+  estado  Boolean?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model menu_Submenu {
+  id_Menu_Submenu Int      @default(autoincrement())
+  id_Menu         Int?
+  id_SubMenu      Int?
+  id_perfil       Int?
+  estado          Boolean?
+
+  @@ignore
+}
+
+model metodo {
+  id_metodo         Int                 @id(map: "PK__metodo__1BBFF0F46965B647") @default(autoincrement())
+  nombre            String              @db.VarChar(250)
+  institucion_datos institucion_datos[]
+}
+
+model MigracionFechaValidacion {
+  Id              Int      @id(map: "PK_MigracionFechaValidacion_n1") @default(autoincrement())
+  CodExamen       String   @db.VarChar(350)
+  FechaValidacion DateTime @db.DateTime
+  IdIsntitucion   Int
+}
+
+model MigracionFechaValidacion_HRA {
+  Id              Int      @id(map: "PK_MigracionFechaValidacion") @default(autoincrement())
+  CodExamen       String   @db.VarChar(350)
+  FechaValidacion DateTime @db.DateTime
+  IdIsntitucion   Int
+}
+
+model MigracionFechaValidacionSoran {
+  Id              Int      @id(map: "PK_MigracionFechaValidacion4") @default(autoincrement())
+  CodExamen       String   @db.VarChar(350)
+  FechaValidacion DateTime @db.DateTime
+  IdInstitucion   Int
+  Aetitle         String?  @db.VarChar(100)
+}
+
+model modalidad {
+  id_modalidad            Int                       @id(map: "PK_modalidad") @default(autoincrement())
+  nombre                  String                    @db.VarChar(250)
+  descripcion             String                    @db.VarChar(50)
+  estado                  Int
+  filtro_modalidad        filtro_modalidad[]
+  ris_plantilla_modalidad ris_plantilla_modalidad[]
+
+  @@index([descripcion], map: "INDX_DESCRIPCION_MODALIDAD")
+}
+
+model perfil {
+  id_perfil               BigInt               @id(map: "PK_perfil") @default(autoincrement())
+  nombre                  String               @db.VarChar(100)
+  descripcion             String?              @db.VarChar(250)
+  id_perfil_visualizacion Int
+  asignar                 Boolean
+  perfil_visualizacion    perfil_visualizacion @relation(fields: [id_perfil_visualizacion], references: [id_perfil_visualizacion], onUpdate: NoAction, map: "FK__perfil__id_perfi__7D98A078")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model perfil_Menu {
+  Id_Perfil_Menu Int      @default(autoincrement())
+  id_Menu        Int?
+  id_Perfil      Int?
+  estado         Boolean?
+
+  @@ignore
+}
+
+model perfil_visualizacion {
+  id_perfil_visualizacion Int      @id(map: "PK__perfil_v__EE803CD7C637875E") @default(autoincrement())
+  nombre                  String   @db.VarChar(250)
+  descripcion             String   @db.VarChar(500)
+  perfil                  perfil[]
+}
+
+model ris_addendum {
+  id_addendum        BigInt      @id(map: "PK__ris_adde__9D173C724C86B2F0") @default(autoincrement())
+  id_addendum_remoto BigInt
+  id_informe         BigInt
+  username           String      @db.VarChar(250)
+  cod_examen         String      @db.VarChar(250)
+  fecha_hora         DateTime    @db.DateTime
+  addendum           String      @db.VarChar(5000)
+  estado_visible     Int
+  estado_bloqueo     Int
+  hl7_enviado        Int
+  ris_informe        ris_informe @relation(fields: [id_informe], references: [id_ris_informe], onUpdate: NoAction, map: "FK__ris_adden__id_in__65F62111")
+}
+
+model ris_azmed_examen {
+  id                        BigInt                      @id(map: "PK_ris_examen_azmed") @default(autoincrement())
+  codexamen                 String                      @db.VarChar(250)
+  IA_enviado                Boolean?
+  fecha_creacion            DateTime                    @db.DateTime
+  id_institucion            Int
+  IA_recibido               Boolean?
+  IA_respuesta              String?                     @db.Text
+  ris_azmed_examen_hallazgo ris_azmed_examen_hallazgo[]
+}
+
+model ris_azmed_examen_hallazgo {
+  id_azmed_examen_hallazgo BigInt             @id(map: "PK__ris_azme__AAD76E0C1E7D5F8E") @default(autoincrement())
+  id_azmed_examen          BigInt
+  id_azmed_patology        Int
+  id_azmed_value           Int
+  ris_azmed_value          ris_azmed_value    @relation(fields: [id_azmed_value], references: [id_azmed_value], onUpdate: NoAction, map: "FK__ris_azmed__id_az__22D5121F")
+  ris_azmed_patology       ris_azmed_patology @relation(fields: [id_azmed_patology], references: [id_azmed_patology], onUpdate: NoAction, map: "FK__ris_azmed__id_az__23C93658")
+  ris_azmed_examen         ris_azmed_examen   @relation(fields: [id_azmed_examen], references: [id], onUpdate: NoAction, map: "FK__ris_azmed__id_az__24BD5A91")
+}
+
+model ris_azmed_patology {
+  id_azmed_patology         Int                         @id(map: "PK_ris_azmed_patology") @default(autoincrement())
+  Descripcion               String?                     @db.VarChar(500)
+  Estado                    Boolean?
+  ris_azmed_examen_hallazgo ris_azmed_examen_hallazgo[]
+}
+
+model ris_azmed_value {
+  id_azmed_value            Int                         @id(map: "PK_ris_azmed_value") @default(autoincrement())
+  Descripcion               String?                     @db.VarChar(500)
+  Estado                    Boolean?
+  ris_azmed_examen_hallazgo ris_azmed_examen_hallazgo[]
+}
+
+model ris_ContadorExamenesMultiris {
+  IdContadorExamenes        Int      @id(map: "PK_ris_ContadorExamenesMultiris2") @default(autoincrement())
+  IdTurno                   Int?
+  Tipo                      String?  @db.VarChar(250)
+  CantidadExamenesValidados Int?
+  PorcentajeCumplimiento    Decimal? @db.Decimal(4, 2)
+}
+
+model ris_dato {
+  id_dato          Int                @id(map: "PK__ris_dato__95283FC26A6F0341") @default(autoincrement())
+  nombre           String             @db.VarChar(250)
+  ris_informe_dato ris_informe_dato[]
+}
+
+model ris_error {
+  Id          Int       @id(map: "PK_ris_error") @default(autoincrement())
+  Numero      Int?
+  Descripcion String?   @db.VarChar(Max)
+  Fecha       DateTime? @db.DateTime
+  Estado      Boolean?
+}
+
+model ris_error_log {
+  Id             Int       @id(map: "PK_ris_error_log") @default(autoincrement())
+  Id_Error       Int?
+  Descripcion    String?   @db.VarChar(Max)
+  id_tiposistema Int?
+  Evento         String?   @db.VarChar(Max)
+  Id_Usuario     Int?
+  Fecha          DateTime? @db.DateTime
+}
+
+model ris_estado_examen {
+  id_estado_examen Int             @id(map: "PK__ris_esta__E46B6EDAA07D42D3") @default(autoincrement())
+  nombre           String          @db.VarChar(50)
+  codigo           String          @db.VarChar(50)
+  orden            Int
+  filtro_estado    filtro_estado[]
+  ris_examen       ris_examen[]
+}
+
+model ris_estado_informe {
+  id_estado_informe Int    @id(map: "PK__ris_esta__E32997B651B0895C") @default(autoincrement())
+  nombre            String @db.VarChar(250)
+  codigo            String @db.VarChar(250)
+}
+
+model ris_examen {
+  id_ris_examen             BigInt                  @id(map: "PK_ris_examen") @default(autoincrement())
+  id_examen_remoto          BigInt
+  codexamen                 String                  @db.VarChar(255)
+  aetitle                   String                  @db.VarChar(255)
+  numeroacceso              String                  @db.VarChar(20)
+  idpaciente                String                  @db.VarChar(1024)
+  nombre                    String                  @db.VarChar(1024)
+  apellidopaterno           String                  @db.VarChar(1024)
+  apellidomaterno           String                  @db.VarChar(1024)
+  fechanacimiento           DateTime                @db.DateTime
+  sexo                      String                  @db.VarChar(20)
+  fechaexamen               DateTime                @db.DateTime
+  modalidad                 String                  @db.VarChar(20)
+  descripcion               String                  @db.VarChar(1024)
+  id_estadoexamen           Int
+  idradiologo               Int
+  nombreradiologo           String                  @db.VarChar(255)
+  fechaasignacion           DateTime                @db.DateTime
+  edad                      String                  @db.VarChar(50)
+  idorden                   String                  @db.VarChar(50)
+  idtipoorden               String                  @db.VarChar(50)
+  medicosolicitante         String                  @db.VarChar(255)
+  fechavalidacion           DateTime                @db.DateTime
+  horaexamen                String                  @db.VarChar(16)
+  flagimagen                Int
+  usernameRadiologo         String                  @db.VarChar(255)
+  id_institucion            Int
+  id_estado_examen          Int?
+  id_estado_sincronizado    Int
+  bloqueado                 Int
+  fecha_bloqueo             DateTime                @db.DateTime
+  id_usuario_bloqueo        Int
+  instancias                Int
+  entregado                 Boolean
+  cantidad_instancias       Int
+  flag_correo_notifica      Int
+  tecnologo                 String?                 @db.NVarChar(255)
+  idUsuarioValidadorExamen  BigInt?
+  idUsuarioInformadorExamen BigInt?
+  PoseePrestacionesBecado   Int?
+  IdUsuarioAsignado         BigInt?
+  id_estado_pendiente       Int
+  FECHA_CIERRE_PENDIENTE    DateTime?               @db.DateTime
+  log_lectura_examen        log_lectura_examen[]
+  ris_estado_examen         ris_estado_examen?      @relation(fields: [id_estado_examen], references: [id_estado_examen], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_es__66EA454A")
+  institucion               institucion             @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_exame__id_in__1BC821DD")
+  RIS_PENDIENTE_ESTADO      RIS_PENDIENTE_ESTADO    @relation(fields: [id_estado_pendiente], references: [id], onUpdate: NoAction, map: "FK_RIS_EXAMEN_RIS_ESTADO_PENDIENTE")
+  ris_examen_prestacion     ris_examen_prestacion[]
+  ris_log                   ris_log[]
+
+  @@index([aetitle], map: "examen_aetitle")
+  @@index([numeroacceso], map: "examen_numeroAcceso")
+  @@index([id_estado_examen], map: "id_ris_examen_codexamen_aetitle_numeroacceso")
+  @@index([fechaasignacion(sort: Desc)], map: "idx_fechaasignacion")
+  @@index([usernameRadiologo, id_estadoexamen], map: "idx_ris_usernameRadiologo_id_estadoexamen")
+  @@index([codexamen], map: "Indice-CodigoExamen-200320251800")
+  @@index([usernameRadiologo, idUsuarioValidadorExamen, idUsuarioInformadorExamen, IdUsuarioAsignado], map: "indx_username_ids_asignado_informador_validador")
+  @@index([idUsuarioValidadorExamen, idUsuarioInformadorExamen, IdUsuarioAsignado], map: "indx-idusuarios-20240826-165459")
+  @@index([fechaasignacion, codexamen], map: "IX_fnInformeContenido_Rango_fecha")
+  @@index([fechaasignacion, id_estado_examen, numeroacceso, idpaciente, nombre, descripcion, id_estado_pendiente, usernameRadiologo, id_institucion, modalidad, idtipoorden], map: "IX_ris_examen_Optimizado")
+  @@index([fechaasignacion, id_estado_examen, numeroacceso, idpaciente, nombre, descripcion, id_estado_pendiente, usernameRadiologo, id_institucion, modalidad, idtipoorden], map: "IX_ris_examen_Optimizado_2")
+  @@index([codexamen, aetitle], map: "OcidgoExamenAetittle-20250320-180240")
+  @@index([codexamen], map: "ris_examen_codexamen")
+  @@index([codexamen, aetitle, id_institucion], map: "ris_examen_codexamen_aetitle_idinstitucion")
+}
+
+model ris_examen_asignacion {
+  id               Int      @id(map: "PK_ris_examen_asignacion") @default(autoincrement())
+  id_examen        Int
+  fecha_asignacion DateTime @db.DateTime
+  id_radiologo     Int
+  usuario          String   @db.VarChar(250)
+  fecha            DateTime @db.DateTime
+  Sistema          String   @db.VarChar(150)
+}
+
+model ris_examen_prestacion {
+  id_examen_prestacion        BigInt          @id(map: "PK__ris_exam__4B4B3DD21AD0E4BB") @default(autoincrement())
+  id_examen_prestacion_remoto BigInt?
+  id_prestacion               BigInt?
+  codExamen                   String?         @db.VarChar(255)
+  id_ris_examen               BigInt?
+  id_prestacion_remoto        BigInt?
+  id_institucion              Int?
+  username                    String?         @db.VarChar(255)
+  institucion                 institucion?    @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_in__68D28DBC")
+  ris_prestacion              ris_prestacion? @relation(fields: [id_prestacion], references: [id_prestacion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_pr__69C6B1F5")
+  ris_examen                  ris_examen?     @relation(fields: [id_ris_examen], references: [id_ris_examen], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_ri__6ABAD62E")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_examen_radiologo_externo {
+  id             BigInt   @default(autoincrement())
+  codexamen      String   @db.VarChar(250)
+  ORM_enviado    Boolean?
+  fecha_creacion DateTime @db.DateTime
+  id_institucion Int
+
+  @@ignore
+}
+
+model ris_informe {
+  id_ris_informe                   BigInt                   @id(map: "PK__ris_info__E59B68F2FD229FB0") @default(autoincrement())
+  id_informe_remoto                BigInt?
+  id_paciente                      String?                  @db.VarChar(50)
+  username_radiologo               String?                  @db.VarChar(50)
+  fecha_validacion                 DateTime?                @db.DateTime
+  flag_patologia_grave             Int?
+  patologia_grave                  String                   @db.VarChar(500)
+  descripcion                      String                   @db.VarChar(1024)
+  codigo_his                       BigInt?
+  valor                            Int?
+  estado_sinconizacion             Int?
+  codExamen                        String                   @db.VarChar(255)
+  id_estado_informe                Int?
+  modalidad                        String                   @db.VarChar(50)
+  id_tipo_informe                  Int
+  id_institucion                   Int
+  id_UsernameRadiologoSegundaFirma Int?
+  id_patologia_grave               Int?
+  usuario_firma                    String?                  @db.VarChar(250)
+  ris_addendum                     ris_addendum[]
+  institucion                      institucion              @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_infor__id_in__6BAEFA67")
+  tipo_informe                     tipo_informe             @relation(fields: [id_tipo_informe], references: [id_tipo_informe], onUpdate: NoAction, map: "FK__ris_infor__id_ti__6CA31EA0")
+  ris_informe_dato                 ris_informe_dato[]
+  ris_informe_prestacion           ris_informe_prestacion[]
+
+  @@index([codExamen, id_estado_informe], map: "ris_informe_codexamen_idestadoinforme")
+  @@index([id_estado_informe], map: "ris_informe_idestadoinforme")
+}
+
+model ris_informe_dato {
+  id_informe_dato        BigInt      @id(map: "PK__ris_info__6B0F94F366C0EBC4") @default(autoincrement())
+  id_informe_dato_remoto BigInt?
+  cod_examen             String      @db.VarChar(255)
+  id_dato                Int
+  valor                  String      @db.Text
+  fecha                  DateTime?   @db.DateTime
+  id_informe             BigInt
+  posicion               Int?
+  id_institucion         Int
+  ris_dato               ris_dato    @relation(fields: [id_dato], references: [id_dato], onUpdate: NoAction, map: "FK__ris_infor__id_da__6D9742D9")
+  ris_informe            ris_informe @relation(fields: [id_informe], references: [id_ris_informe], onUpdate: NoAction, map: "FK__ris_infor__id_in__339FAB6E")
+  institucion            institucion @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_infor__id_in__6F7F8B4B")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_informe_harpiai {
+  id_ris_informe_harpiai  BigInt    @default(autoincrement())
+  codexamen               String    @db.VarChar(255)
+  idpaciente              String    @db.VarChar(1024)
+  fecha_examen            DateTime  @db.DateTime
+  id_institucion          BigInt
+  id_prestacion           BigInt
+  prestacion              String?   @db.VarChar(255)
+  modalidad               String?   @db.VarChar(20)
+  report_id               String?   @db.VarChar(255)
+  orm_enviado             Boolean?
+  fecha_orm               DateTime? @db.DateTime
+  oru_recibido            Boolean?
+  fecha_oru               DateTime? @db.DateTime
+  ia_titulo               String?   @db.Text
+  ia_hallazgos            String?   @db.Text
+  ia_impresion            String?   @db.Text
+  ia_antecedentesclinicos String?   @db.Text
+  ia_tecnica              String?   @db.Text
+  dcm_nombre              String?   @db.VarChar(255)
+  dcm_numacceso           String?   @db.VarChar(255)
+  dcm_fecha               String?   @db.VarChar(50)
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_informe_hl7 {
+  id_informe_hl7 BigInt   @default(autoincrement())
+  codexamen      String   @db.VarChar(250)
+  oru_enviado    Boolean
+  fecha_creacion DateTime @db.DateTime
+  id_ris_informe BigInt?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_informe_IA {
+  id_informe_IA        BigInt   @default(autoincrement())
+  codexamen            String   @db.VarChar(250)
+  IA_enviado           Boolean?
+  fecha_creacion       DateTime @db.DateTime
+  id_ris_informe       BigInt?
+  id_institucion       Int
+  IA_recibido          Boolean?
+  IA_respuesta         String?  @db.Text
+  IA_patologia         String?  @db.Text
+  IA_feedback          Boolean?
+  IA_resp_titulo       String?  @db.Text
+  IA_resp_hallazgos    String?  @db.Text
+  IA_resp_impresion    String?  @db.Text
+  IA_resp_antecedentes String?  @db.Text
+  IA_resp_tecnica      String?  @db.Text
+
+  @@ignore
+}
+
+model ris_informe_prestacion {
+  id_informe_prestacion            BigInt          @id(map: "PK__ris_info__9148A9A4CAEC9CE0") @default(autoincrement())
+  id_ris_informe_prestacion_remoto BigInt?
+  id_informe                       BigInt?
+  id_prestacion                    BigInt?
+  fecha                            DateTime?       @db.DateTime
+  id_institucion                   Int
+  id_examen_prestacion             BigInt?
+  ris_informe                      ris_informe?    @relation(fields: [id_informe], references: [id_ris_informe], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_infor__id_in__6166761E")
+  institucion                      institucion     @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_infor__id_in__7167D3BD")
+  ris_prestacion                   ris_prestacion? @relation(fields: [id_prestacion], references: [id_prestacion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_infor__id_pr__725BF7F6")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_informe_radiologoexterno {
+  id_informe_radiologoexterno BigInt    @default(autoincrement())
+  codexamen                   String    @db.VarChar(250)
+  id_institucion              Int
+  id_radiologo                Int
+  orm_enviado                 Boolean
+  fecha_orm                   DateTime? @db.DateTime
+  oru_recibido                Boolean
+  fecha_oru                   DateTime? @db.DateTime
+  id_ris_informe              BigInt?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model RIS_INFORMEOIT {
+  ID                         Int       @default(autoincrement())
+  RISEXAMEN                  Int?
+  CODEXAMEN                  String?   @db.VarChar(255)
+  PACIENTEID                 String?   @db.VarChar(25)
+  NOMBREPACIENTE             String?   @db.VarChar(100)
+  FECHARADIOGRAFIA           DateTime? @db.DateTime
+  NUMERORADIOGRAFIA          String?   @db.VarChar(50)
+  RADIOGRAFIADIGITAL         String?   @db.VarChar(2)
+  MEDICOID                   BigInt?
+  LECTURANEGASTOCOPIO        String?   @db.VarChar(2)
+  CALIDAD                    String?   @db.VarChar(2)
+  RADIOGRAFIANORMAL          String?   @db.VarChar(2)
+  COMENTARIO                 String?   @db.VarChar(255)
+  ANORMALIDADPARENQUIMATOSA  String?   @db.VarChar(2)
+  OPACIDADPRIMARIAC1         String?   @db.VarChar(2)
+  OPACIDADPRIMARIAC2         String?   @db.VarChar(2)
+  OPACIDADSECUNDARIAC1       String?   @db.VarChar(2)
+  OPACIDADSECUNDARIAC2       String?   @db.VarChar(2)
+  OPACIDADZONAD1             String?   @db.VarChar(2)
+  OPACIDADZONAD2             String?   @db.VarChar(2)
+  OPACIDADZONAD3             String?   @db.VarChar(2)
+  OPACIDADZONAI1             String?   @db.VarChar(2)
+  OPACIDADZONAI2             String?   @db.VarChar(2)
+  OPACIDADZONAI3             String?   @db.VarChar(2)
+  OPACIDADPROFUSION          String?   @db.VarChar(3)
+  OPACIDADGRANDE             String?   @db.VarChar(2)
+  ANORMALIDADPLEURAL         String?   @db.VarChar(2)
+  PLACAPLEURAL               String?   @db.VarChar(2)
+  PP_SITIOPERFIL             String?   @db.VarChar(2)
+  PP_SITIOFRENTE             String?   @db.VarChar(2)
+  PP_SITIODIAGRAMA           String?   @db.VarChar(2)
+  PP_SITIO_OTRO              String?   @db.VarChar(2)
+  PP_CALSIFICACIONPERFIL     String?   @db.VarChar(2)
+  PP_CALSIFICACIONFRENTE     String?   @db.VarChar(2)
+  PP_CALSIFICACIONDIAGRAMA   String?   @db.VarChar(2)
+  PP_CALSIFICACIONOTRO       String?   @db.VarChar(2)
+  PP_EXTENSIONPAREDPERFILOP  String?   @db.VarChar(2)
+  PP_EXTENSIONPAREDPERFILSE  String?   @db.VarChar(2)
+  PP_EXTENSIONPAREDFRENTEOP  String?   @db.VarChar(2)
+  PP_EXTENSIONPAREDFRENTESE  String?   @db.VarChar(2)
+  PP_ANCHODERECHAOP          String?   @db.VarChar(2)
+  PP_ANCHODERECHASE          String?   @db.VarChar(2)
+  PP_ANCHOIZQUIERDAOP        String?   @db.VarChar(2)
+  PP_ANCHOIZQUIERDASE        String?   @db.VarChar(2)
+  OBLITERACIONANGCOSTOFRE    String?   @db.VarChar(2)
+  ENGROSAMIENTOPLEURALDIFUSO String?   @db.VarChar(2)
+  EPD_SITIOPERFIL            String?   @db.VarChar(2)
+  EPD_SITIOFRENTE            String?   @db.VarChar(2)
+  EPD_CALSIFICACIONPERFIL    String?   @db.VarChar(2)
+  EPD_CALSIFICACIONFRENTE    String?   @db.VarChar(2)
+  EPD_EXTENSIONPAREDPERFILOP String?   @db.VarChar(2)
+  EPD_EXTENSIONPAREDPERFILSE String?   @db.VarChar(2)
+  EPD_EXTENSIONPAREDFRENTEOP String?   @db.VarChar(2)
+  EPD_EXTENSIONPAREDFRENTESE String?   @db.VarChar(2)
+  EPD_ANCHODERECHAOP         String?   @db.VarChar(2)
+  EPD_ANCHODERECHASE         String?   @db.VarChar(2)
+  EPD_ANCHOIZQUIERDAOP       String?   @db.VarChar(2)
+  EPD_ANCHOIZQUIERDASE       String?   @db.VarChar(2)
+  OTRASANORMALIDADES         String?   @db.VarChar(2)
+  SIMBOLO_AA                 Int?
+  SIMBOLO_AT                 Int?
+  SIMBOLO_AX                 Int?
+  SIMBOLO_BU                 Int?
+  SIMBOLO_CA                 Int?
+  SIMBOLO_CG                 Int?
+  SIMBOLO_CN                 Int?
+  SIMBOLO_CO                 Int?
+  SIMBOLO_CP                 Int?
+  SIMBOLO_CV                 Int?
+  SIMBOLO_DI                 Int?
+  SIMBOLO_EF                 Int?
+  SIMBOLO_EM                 Int?
+  SIMBOLO_ES                 Int?
+  SIMBOLO_FR                 Int?
+  SIMBOLO_HI                 Int?
+  SIMBOLO_HO                 Int?
+  SIMBOLO_ID                 Int?
+  SIMBOLO_IH                 Int?
+  SIMBOLO_KL                 Int?
+  SIMBOLO_ME                 Int?
+  SIMBOLO_PA                 Int?
+  SIMBOLO_PB                 Int?
+  SIMBOLO_PI                 Int?
+  SIMBOLO_PX                 Int?
+  SIMBOLO_RA                 Int?
+  SIMBOLO_RP                 Int?
+  SIMBOLO_TB                 Int?
+  SIMBOLO_OD                 Int?
+  COMENTARIOGENERAL          String?   @db.VarChar(Max)
+  FECHALECTURA               DateTime? @db.DateTime
+  ESTADO                     Int?
+  RADIOLOGOVALIDADOR         String?   @db.VarChar(100)
+
+  @@index([CODEXAMEN], map: "IND_CODEXAMEN_INFORMEOIT", clustered: true)
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_informeoit_old {
+  id                                                Int       @default(autoincrement())
+  id_examen                                         Int?
+  nombre                                            String?   @db.VarChar(250)
+  idpaciente                                        String?   @db.VarChar(25)
+  fecha_radiografia                                 DateTime? @db.DateTime
+  numero_radiografia                                String?   @db.VarChar(50)
+  radiografia_digital                               String?   @db.VarChar(25)
+  idmedico                                          BigInt?
+  lectura_negatoscopio                              String?   @db.VarChar(25)
+  tecnica_qualidaden                                String?   @db.VarChar(25)
+  radiografia_normal                                String?   @db.VarChar(25)
+  comentario                                        String?   @db.VarChar(255)
+  anormalidad_parenquimatosa                        String?   @db.VarChar(25)
+  primaria1                                         String?   @db.VarChar(25)
+  primaria2                                         String?   @db.VarChar(25)
+  primaria3                                         String?   @db.VarChar(25)
+  secundaria1                                       String?   @db.VarChar(25)
+  secundaria2                                       String?   @db.VarChar(25)
+  secundaria3                                       String?   @db.VarChar(25)
+  zonas1                                            String?   @db.VarChar(25)
+  profusion1                                        String?   @db.VarChar(25)
+  profusion2                                        String?   @db.VarChar(25)
+  profusion3                                        String?   @db.VarChar(25)
+  profusion4                                        String?   @db.VarChar(25)
+  opacidades_pequenas1                              String?   @db.VarChar(25)
+  anormalidad_pleural                               String?   @db.VarChar(25)
+  placas_pleurales                                  String?   @db.VarChar(25)
+  placas_pleurales_sitio_perfil                     String?   @db.VarChar(25)
+  placas_pleurales_sitio_frente                     String?   @db.VarChar(25)
+  placas_pleurales_sitio_diagrama                   String?   @db.VarChar(25)
+  placas_pleurales_sitio_otro                       String?   @db.VarChar(25)
+  placas_pleurales_calcificacion_perfil             String?   @db.VarChar(25)
+  placas_pleurales_calcificacion_frente             String?   @db.VarChar(25)
+  placas_pleurales_calcificacion_diagrama           String?   @db.VarChar(25)
+  placas_pleurales_calcificacion_otro               String?   @db.VarChar(25)
+  placas_pleurales_extencion_pared1                 String?   @db.VarChar(25)
+  placas_pleurales_extencion_pared2                 String?   @db.VarChar(25)
+  placas_pleurales_ancho1                           String?   @db.VarChar(25)
+  placas_pleurales_ancho2                           String?   @db.VarChar(25)
+  obliteracion_angulo_costofrenico                  String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso                      String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_sitio_perfil         String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_sitio_frente         String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_calcificacion_perfil String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_calcificacion_frente String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_extencion_pared1     String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_extencion_pared2     String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_ancho1               String?   @db.VarChar(25)
+  engrosamiento_pleural_difuso_ancho2               String?   @db.VarChar(25)
+  otras_anormalidades                               String?   @db.VarChar(25)
+  simbolo_aa                                        Int?
+  simbolo_at                                        Int?
+  simbolo_ax                                        Int?
+  simbolo_bu                                        Int?
+  simbolo_ca                                        Int?
+  simbolo_cg                                        Int?
+  simbolo_cn                                        Int?
+  simbolo_co                                        Int?
+  simbolo_cp                                        Int?
+  simbolo_cv                                        Int?
+  simbolo_di                                        Int?
+  simbolo_ef                                        Int?
+  simbolo_em                                        Int?
+  simbolo_es                                        Int?
+  simbolo_fr                                        Int?
+  simbolo_hi                                        Int?
+  simbolo_ho                                        Int?
+  simbolo_id                                        Int?
+  simbolo_ih                                        Int?
+  simbolo_kl                                        Int?
+  simbolo_me                                        Int?
+  simbolo_pa                                        Int?
+  simbolo_pb                                        Int?
+  simbolo_pi                                        Int?
+  simbolo_px                                        Int?
+  simbolo_ra                                        Int?
+  simbolo_rp                                        Int?
+  simbolo_tb                                        Int?
+  simbolo_od                                        Int?
+  comentario_general                                String?   @db.VarChar(Max)
+  fecha_lectura                                     DateTime? @db.DateTime
+  codexamen                                         String?   @db.VarChar(255)
+  estado                                            Int?
+  RadiologoValidador                                String?   @db.VarChar(150)
+
+  @@ignore
+}
+
+model ris_institucion_patologia_critica {
+  id_institucion_patologia_critica BigInt                 @id(map: "PK__ris_inst__6A804D46AAF733F2") @default(autoincrement())
+  id_institucion                   Int?
+  id_patologia_critica             BigInt?
+  institucion                      institucion?           @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_insti__id_in__73501C2F")
+  ris_patologia_critica            ris_patologia_critica? @relation(fields: [id_patologia_critica], references: [id_patologia_critica], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_insti__id_pa__74444068")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_instituciones_tiempo {
+  idTiempoInstitucion Int     @default(autoincrement())
+  idInstitucion       Int?
+  idTipoUrgencia      Int?
+  TiempoHoras         Int?
+  nombre              String? @db.VarChar(50)
+  descripcion         String? @db.VarChar(10)
+  TiempoReal          Int?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_instituciones_tiempo_BKP {
+  idTiempoInstitucion Int     @default(autoincrement())
+  idInstitucion       Int?
+  idTipoUrgencia      Int?
+  TiempoHoras         Int?
+  nombre              String? @db.VarChar(50)
+  descripcion         String? @db.VarChar(10)
+
+  @@ignore
+}
+
+model ris_instituciones_tiempobkp {
+  idTiempoInstitucion Int            @id(map: "PK_ris_instituciones_tiempo") @default(autoincrement())
+  idInstitucion       Int?
+  idTipoUrgencia      Int?
+  TiempoHoras         Int?
+  nombre              String?        @db.VarChar(50)
+  descripcion         String?        @db.VarChar(10)
+  institucion         institucion?   @relation(fields: [idInstitucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK_ris_instituciones_tiempo_institucion")
+  tipo_urgencia       tipo_urgencia? @relation(fields: [idTipoUrgencia], references: [id_tipo_urgencia], onDelete: NoAction, onUpdate: NoAction, map: "FK_ris_instituciones_tiempo_tipo_urgencia")
+
+  @@index([idInstitucion, idTipoUrgencia], map: "IDX_INSTITUCION_URGENCIA")
+  @@index([TiempoHoras], map: "INDX_TIEMPO")
+}
+
+model ris_log {
+  id_log         BigInt     @id(map: "PK__ris_log__6CC851FE0B102CEC") @default(autoincrement())
+  sistema        String     @db.VarChar(250)
+  observacion    String     @db.VarChar(Max)
+  id_institucion Int
+  codexamen      String     @db.VarChar(250)
+  id_ris_examen  BigInt
+  fecha          DateTime   @db.DateTime
+  id_usuario     BigInt
+  tipoAccion     Int?
+  ris_examen     ris_examen @relation(fields: [id_ris_examen], references: [id_ris_examen], onUpdate: NoAction, map: "FK__ris_log__id_ris___278EDA44")
+  usuario        usuario    @relation(fields: [id_usuario], references: [id_usuario], onUpdate: NoAction, map: "FK__ris_log__id_usua__269AB60B")
+
+  @@index([id_ris_examen, tipoAccion], map: "INDX_RIS_EXAMEN_TIPO_ACCION_FILTER")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_log_provisoriopermanente {
+  id               Int       @default(autoincrement())
+  fechahoraingreso DateTime? @db.DateTime
+  ir_ris_examen    String?   @db.NVarChar(50)
+  numeroacceso     String?   @db.NVarChar(50)
+  aetitle          String?   @db.NVarChar(50)
+
+  @@ignore
+}
+
+model ris_orden_examen {
+  id_ris_orden_examen    BigInt       @id(map: "PK__ris_orde__A9BD16DF00358E2B") @default(autoincrement())
+  id_orden_examen_remoto String?      @db.VarChar(20)
+  observaciones          String       @db.VarChar(Max)
+  antecedentes_clinicos  String       @db.VarChar(Max)
+  id_institucion         Int?
+  institucion            institucion? @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_orden__id_in__753864A1")
+}
+
+model ris_patologia_critica {
+  id_patologia_critica               BigInt                               @id(map: "PK__ris_pato__E5B38FA74E5F1615") @default(autoincrement())
+  nombre                             String                               @db.VarChar(255)
+  estado                             Boolean?
+  id_institucion                     Int?
+  marca_leyenda_informe              Int?
+  tipo_envio_notificacion            Int?
+  tipo_patologia                     String?                              @db.VarChar(20)
+  ris_institucion_patologia_critica  ris_institucion_patologia_critica[]
+  institucion                        institucion?                         @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_patol__id_in__762C88DA")
+  ris_patologia_critica_homologacion ris_patologia_critica_homologacion[]
+}
+
+model ris_patologia_critica_homologacion {
+  id_patologia_critica_homologacion BigInt                @id(map: "PK__ris_pato__FA00C7A02E9A31C0") @default(autoincrement())
+  id_patologia_critica              BigInt
+  nombre_homologado                 String                @db.VarChar(255)
+  ris_patologia_critica             ris_patologia_critica @relation(fields: [id_patologia_critica], references: [id_patologia_critica], onUpdate: NoAction, map: "FK__ris_patol__id_pa__31233176")
+}
+
+model RIS_PENDIENTE_ARCHIVO {
+  id_ris_examen_canal BigInt
+  id_archico          BigInt
+  nombre              String    @db.VarChar(50)
+  fecha_envio         DateTime  @db.DateTime
+  id_usuario_envio    BigInt
+  fecha_lectura       DateTime? @db.DateTime
+  id_usuario_lectura  BigInt?
+  id_tipo_mensaje     Int?
+
+  @@id([id_ris_examen_canal, id_archico], map: "PK_RIS_PENDIENTE_ARCHIVO_1")
+}
+
+model RIS_PENDIENTE_CANAL {
+  id_ris_examen_canal BigInt    @id(map: "PK_RIS_PENDIENTE_CANAL")
+  id_usuario_creador  BigInt
+  id_categoria        Int
+  fecha_creacion      DateTime  @db.DateTime
+  fecha_cierre        DateTime? @db.DateTime
+  id_usuario_cierre   BigInt?
+  tiempo_transcurrido Int?
+  fecha_asignacion    DateTime  @db.DateTime
+
+  @@index([fecha_cierre], map: "INDX_FECHA_CIERRE")
+}
+
+model RIS_PENDIENTE_CATEGORIA {
+  ID_CATEGORIA Int     @id(map: "PK_RIS_CATEGORIA_PENDIENTE")
+  DESCRIPCION  String  @db.VarChar(50)
+  ORDEN        Int
+  VIGENCIA     Boolean
+}
+
+model RIS_PENDIENTE_CHAT {
+  id_ris_examen_canal BigInt
+  id_mensaje          BigInt
+  id_usuario          BigInt
+  texto_mensaje       String?   @db.VarChar(500)
+  fecha_hora_envio    DateTime? @db.DateTime
+  id_tipo_mensaje     Int?
+
+  @@id([id_ris_examen_canal, id_mensaje], map: "PK_RIS_PENDIENTE_CHAT")
+}
+
+model RIS_PENDIENTE_ESTADO {
+  id          Int          @id(map: "PK_RIS_PENDIENTE_ESTADO")
+  descripcion String       @db.VarChar(50)
+  orden       Int
+  vigencia    Boolean
+  visible     Boolean
+  ris_examen  ris_examen[]
+}
+
+model RIS_PENDIENTE_ESTADO_ARCHIVO {
+  id          Int     @id(map: "PK_RIS_PENDIENTE_ESTADO_ARCHIVO")
+  descripcion String  @db.VarChar(20)
+  vigencia    Boolean
+}
+
+model RIS_PENDIENTE_TIPO {
+  id          Int     @id(map: "PK_RIS_PENDIENTE_TIPO")
+  descripcion String  @db.VarChar(10)
+  vigencia    Boolean
+}
+
+model RIS_PENDIENTE_TIPO_ARCHIVO {
+  id          Int     @id(map: "PK_RIS_PENDIENTE_TIPO_ARCHIVO")
+  descripcion String  @db.VarChar(20)
+  vigencia    Boolean
+}
+
+model ris_plantilla {
+  id_plantilla            BigInt                    @id(map: "PK__ris_plan__2B54D0E7937A8511") @default(autoincrement())
+  nombre                  String?                   @db.VarChar(255)
+  titulo                  String?                   @db.VarChar(255)
+  tecnica                 String?                   @db.VarChar(Max)
+  hallazgos               String?                   @db.VarChar(Max)
+  impresion               String?                   @db.VarChar(Max)
+  id_usuario              BigInt?
+  id_modalidad            Int?
+  antecedentes            String?                   @db.VarChar(Max)
+  usuario                 usuario?                  @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_plant__id_us__395884C4")
+  ris_plantilla_modalidad ris_plantilla_modalidad[]
+}
+
+model ris_plantilla_modalidad {
+  id_plantilla_modalidad BigInt        @id(map: "PK__ris_plan__634E4A07DA634E72") @default(autoincrement())
+  id_plantilla           BigInt
+  id_modalidad           Int
+  modalidad              modalidad     @relation(fields: [id_modalidad], references: [id_modalidad], onUpdate: NoAction, map: "FK__ris_plant__id_mo__33F4B129")
+  ris_plantilla          ris_plantilla @relation(fields: [id_plantilla], references: [id_plantilla], onUpdate: NoAction, map: "FK__ris_plant__id_pl__33008CF0")
+}
+
+model ris_prestacion {
+  id_prestacion          BigInt                   @id(map: "PK__ris_pres__68DA3409F4A7C451") @default(autoincrement())
+  id_prestacion_remoto   BigInt?
+  aetitle                String                   @db.VarChar(250)
+  id_institucion         Int
+  nombre                 String                   @db.VarChar(255)
+  oit                    Boolean?
+  codigo                 String?                  @db.NVarChar(200)
+  codGlobal              String?                  @db.VarChar(250)
+  ris_examen_prestacion  ris_examen_prestacion[]
+  ris_informe_prestacion ris_informe_prestacion[]
+  institucion            institucion              @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_prest__id_in__7814D14C")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_prestacion_bkp {
+  id_prestacion        BigInt   @default(autoincrement())
+  id_prestacion_remoto BigInt?
+  aetitle              String   @db.VarChar(250)
+  id_institucion       Int
+  nombre               String   @db.VarChar(255)
+  oit                  Boolean?
+  codigo               String?  @db.NVarChar(200)
+  codGlobal            String?  @db.VarChar(250)
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model ris_prestacion_bkp_17_10_25 {
+  id_prestacion        BigInt   @default(autoincrement())
+  id_prestacion_remoto BigInt?
+  aetitle              String   @db.VarChar(250)
+  id_institucion       Int
+  nombre               String   @db.VarChar(255)
+  oit                  Boolean?
+  codigo               String?  @db.NVarChar(200)
+  codGlobal            String?  @db.VarChar(250)
+
+  @@ignore
+}
+
+model ris_RegistroTurnoMultiris {
+  IdRegistroTurno       Int       @id(map: "PK_ris_ResgistroTurnoMultiris2") @default(autoincrement())
+  IdTurno               Int?
+  FechaIngreso          DateTime? @db.DateTime
+  FechaUltimaValidacion DateTime? @db.DateTime
+}
+
+model ris_tipoSistema {
+  id_TipoSistema Int      @id(map: "PK_ris_tipoSistema") @default(autoincrement())
+  Descripcion    String?  @db.VarChar(500)
+  Estado         Boolean?
+}
+
+model ris_TurnoMultiris {
+  IdTurno    Int       @id(map: "PK_ris_TurnoMultiris") @default(autoincrement())
+  Fecha      DateTime? @db.Date
+  FechaFin   DateTime? @db.Date
+  Dia        String?   @db.VarChar(15)
+  HoraInicio DateTime? @db.Time
+  HoraFin    DateTime? @db.Time
+  Radiologo  String?   @db.VarChar(100)
+  Username   String?   @db.VarChar(100)
+}
+
+model risInformeExterno {
+  IdInformeExterno   Int      @id(map: "PK_risInformeExterno99") @default(autoincrement())
+  IdInforme          BigInt
+  NombreInforme      String   @db.VarChar(500)
+  CodExamen          String   @db.VarChar(350)
+  IdPaciente         String   @db.VarChar(50)
+  FechaValidacion    DateTime @db.DateTime
+  IdEstado           Int
+  Estado             String   @db.VarChar(50)
+  IdRadiologo        Int
+  UserNameRadiologo  String   @db.VarChar(150)
+  NombreRadiologo    String   @db.VarChar(250)
+  FlagPatologiaGrave Int
+  PatologiaGrave     String   @db.VarChar(350)
+  FechaCreacion      DateTime @db.DateTime
+  CodigoHis          String   @db.VarChar(50)
+}
+
+model risInformeExternoPrestacion {
+  IdInformeExternoPrestacion Int    @id(map: "PK_risInformeExternoPrestacion99") @default(autoincrement())
+  IdInformeExterno           Int
+  IdPrestacion               Int
+  CodFonasa                  String @db.VarChar(150)
+  Descripcion                String @db.VarChar(350)
+}
+
+model solicitud_addendum {
+  id_solicitud_addendum BigInt          @id(map: "PK__solicitu__6664A122BBE678DE") @default(autoincrement())
+  id_institucion        Int
+  codexamen             String          @db.VarChar(250)
+  id_ris_examen         BigInt
+  usuario               String          @db.VarChar(250)
+  motivo                String          @db.VarChar(5000)
+  id_estado_addendum    Int
+  fecha_solicitud       DateTime?       @db.DateTime
+  fecha_resolucion      DateTime?       @db.DateTime
+  estado_addendum       estado_addendum @relation(fields: [id_estado_addendum], references: [id_estado_addendum], onUpdate: NoAction, map: "FK__solicitud__id_es__147C05D0")
+}
+
+model SolicitudAddemdum {
+  id                       Int       @id(map: "PK_SolicitudAddemdum") @default(autoincrement())
+  FechaIngreso             DateTime  @db.DateTime
+  Usuario                  String    @db.VarChar(150)
+  UsuarioMail              String    @db.VarChar(150)
+  UsuarioInstitucion       Int
+  IdRisExamen              BigInt
+  Detalle                  String    @db.VarChar(4000)
+  EstadoSolicitudAdedemdum Int
+  FechaResolucion          DateTime? @db.Date
+  FechaProceso             DateTime? @db.Date
+  IdTipoSolicitudAddendum  Int
+  Comentario               String?   @db.VarChar(4000)
+  Adjunto                  String?   @db.VarChar(250)
+
+  @@index([IdRisExamen], map: "INDX_RIS_EXAMEN")
+  @@index([IdRisExamen, EstadoSolicitudAdedemdum], map: "INDX_RIS_EXAMEN_ESTADO_ADDENDUM")
+  @@index([IdRisExamen, EstadoSolicitudAdedemdum], map: "IX_solicitudAddemdum_estado_risexamen")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model SolicitudAddemdumControl {
+  id                    Int      @default(autoincrement())
+  idSolicitudAddendum   Int
+  orm_enviado           Boolean
+  fechaIngresoSolicitud DateTime @db.DateTime
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model subMenu {
+  id_SubMenu Int      @default(autoincrement())
+  Nombre     String?  @db.VarChar(250)
+  estado     Boolean?
+
+  @@ignore
+}
+
+model TagExamen {
+  Id                 Int       @id(map: "PK_TagExamen") @default(autoincrement())
+  Nombre             String    @db.VarChar(250)
+  TagGeneral         Int
+  Usuario            String    @db.VarChar(250)
+  FechaCreacion      DateTime  @db.DateTime
+  FechaEliminacion   DateTime? @db.DateTime
+  UsuarioCreacion    String    @db.VarChar(250)
+  UsuarioEliminacion String?   @db.VarChar(250)
+  Vigente            Int
+}
+
+model tipo_becado {
+  id_tipo_becado Int           @id(map: "PK__tipo_bec__B2642D403F7BA394") @default(autoincrement())
+  nombre         String        @db.VarChar(250)
+  descripcion    String        @db.VarChar(5000)
+  institucion    institucion[]
+}
+
+model tipo_conexion {
+  id_tipo_conexion Int           @id(map: "PK__tipo_con__B6DD73C3497BC5DB") @default(autoincrement())
+  nombre           String        @db.VarChar(250)
+  descripcion      String        @db.VarChar(500)
+  institucion      institucion[]
+}
+
+model tipo_firma {
+  id_tipo_firma       Int                   @id(map: "PK__tipo_fir__C941DB25B60F56FB") @default(autoincrement())
+  nombre              String                @db.VarChar(250)
+  descripcion         String                @db.VarChar(5000)
+  usuario_institucion usuario_institucion[]
+}
+
+model tipo_informe {
+  id_tipo_informe Int           @id(map: "PK__tipo_inf__9F4D9FA55B49ED86") @default(autoincrement())
+  nombre          String        @db.VarChar(250)
+  descripcion     String        @db.VarChar(500)
+  ris_informe     ris_informe[]
+}
+
+model tipo_urgencia {
+  id_tipo_urgencia            Int                           @id(map: "PK__tipo_urg__780AD7EDAB59BC76") @default(autoincrement())
+  nombre                      String                        @db.VarChar(250)
+  descripcion                 String                        @db.VarChar(250)
+  estado                      Int
+  minutos_entrega             Int
+  nombre_corto                String?                       @db.VarChar(3)
+  prioridad                   Int?
+  filtro_tipo_urgencia        filtro_tipo_urgencia[]
+  ris_instituciones_tiempobkp ris_instituciones_tiempobkp[]
+
+  @@index([descripcion], map: "INDX_DESCRIPCION_INSTITUCION")
+  @@index([prioridad], map: "INDX_PRIORIDAD_URGENCIA")
+}
+
+model TipoSolicitudAddendum {
+  Id      Int    @id(map: "PK_TipoSolicitudAddendum") @default(autoincrement())
+  Nombre  String @db.VarChar(150)
+  Vigente Int
+}
+
+model usuario {
+  id_usuario              BigInt                @id(map: "PK_usuario") @default(autoincrement())
+  nombre                  String                @db.VarChar(100)
+  apellido_paterno        String                @db.VarChar(100)
+  apellido_materno        String                @db.VarChar(100)
+  estado                  Int
+  username                String                @db.VarChar(100)
+  password                String                @db.VarChar(100)
+  id_perfil               Int
+  rut                     String                @db.VarChar(50)
+  email1                  String?               @db.VarChar(100)
+  email2                  String?               @db.VarChar(100)
+  telefono1               String?               @db.VarChar(100)
+  telefono2               String?               @db.VarChar(100)
+  dias_examenes           Int?
+  vocali                  Int
+  agente_vocali           Int
+  id_visor                Int
+  meddreams_automatico    Int
+  firma                   String                @db.VarChar(250)
+  id_usuario_referencia   Int
+  autentica_sms           Int?
+  fecha_modificacion_pass DateTime?             @db.DateTime
+  password_vocali         String?               @db.VarChar(100)
+  grupo                   String?               @db.VarChar(50)
+  email_jefatura          String?               @db.VarChar(60)
+  tipo_contrato           String?               @db.VarChar(50)
+  filtro_usuario          filtro_usuario[]
+  log_lectura_examen      log_lectura_examen[]
+  ris_log                 ris_log[]
+  ris_plantilla           ris_plantilla[]
+  visor                   visor                 @relation(fields: [id_visor], references: [id_visor], onUpdate: NoAction, map: "FK__usuario__id_viso__7908F585")
+  usuario_institucion     usuario_institucion[]
+
+  @@index([username], map: "idx_ris_usuario")
+}
+
+model usuario_institucion {
+  id_usuario_institucion BigInt       @id(map: "PK__usuario___03A798D2F22F21A8") @default(autoincrement())
+  id_usuario             BigInt
+  id_institucion         Int?
+  id_tipo_firma          Int
+  institucion            institucion? @relation(fields: [id_institucion], references: [id_institucion], onDelete: NoAction, onUpdate: NoAction, map: "FK__usuario_i__id_in__79FD19BE")
+  tipo_firma             tipo_firma   @relation(fields: [id_tipo_firma], references: [id_tipo_firma], onUpdate: NoAction, map: "FK__usuario_i__id_ti__49E3F248")
+  usuario                usuario      @relation(fields: [id_usuario], references: [id_usuario], onUpdate: NoAction, map: "FK__usuario_i__id_us__7AF13DF7")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model usuario_institucion_09012023 {
+  id_usuario_institucion BigInt
+  id_usuario             BigInt
+  id_institucion         Int?
+  id_tipo_firma          Int
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model Usuario_referencia_bkp {
+  id_usuario            BigInt @default(autoincrement())
+  username              String @db.VarChar(100)
+  id_usuario_referencia Int
+
+  @@ignore
+}
+
+model UsuarioRadiologoBecado {
+  Id                 Int @id(map: "PK_UsuarioRadiologoBecado") @default(autoincrement())
+  IdUsuarioBecado    Int
+  IdUsuarioRadiologo Int
+}
+
+model UsuarioRadiologoEspecializado {
+  Id                     Int @id(map: "PK_UsuarioRadiologoEspecializado") @default(autoincrement())
+  IdUsuarioEspecializado Int
+  IdUsuarioRadiologo     Int
+}
+
+model visor {
+  id_visor          Int                 @id(map: "PK__visor__26067FB1890F0DA4") @default(autoincrement())
+  nombre            String              @db.VarChar(250)
+  descripcion       String              @db.VarChar(500)
+  icono             String              @db.VarChar(250)
+  id_estado         Int
+  institucion_visor institucion_visor[]
+  usuario           usuario[]
+}
+
+model vocali {
+  id_vocali     Int    @id(map: "PK__vocali__AC36DB71A8ADEB6B") @default(autoincrement())
+  puerto        Int
+  direccion_url String @db.VarChar(500)
+  estado        Int
+}
