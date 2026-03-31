@@ -1,7 +1,7 @@
 import React from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import WorklistTable from '@/components/worklist/WorklistTable';
-import { getWorklist } from '@/lib/db/queries';
+import { fetchEnrichedWorklist } from '@/lib/services/enrichment-service';
 import { WorklistFilters } from '@/types/ris';
 
 export const metadata = {
@@ -24,8 +24,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     examStatusId: status ? parseInt(status) : undefined,
   };
 
-  // Fetching real data synchronized with the time range toggle
-  const { data: studies } = await getWorklist({ page: 1, pageSize: 150 }, filters);
+  // Fetching real data synchronized with the time range toggle (Enriched with AMIS 3.0 SaaS)
+  const { data: studies } = await fetchEnrichedWorklist({ page: 1, pageSize: 150 }, filters);
 
   return (
     <DashboardLayout>

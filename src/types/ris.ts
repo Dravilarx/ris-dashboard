@@ -57,6 +57,15 @@ export interface Study {
   requestingPhysician: string;
 }
 
+/** Estudio radiológico enriquecido con datos de AMIS 3.0 */
+export interface EnrichedStudy extends Study {
+  enrichedRadiologistName: string;
+  enrichedInstitutionName: string;
+  expectedSLACriticalMinutes: number;
+  expectedSLAUrgentMinutes: number;
+  expectedSLANormalMinutes: number;
+}
+
 /** Informe radiológico */
 export interface Report {
   id: number;

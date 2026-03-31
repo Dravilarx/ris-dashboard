@@ -1,0 +1,29 @@
+Conectado a la base de datos VPN
+
+==================================
+Tablas y Columnas:
+┌─────────┬─────────────────────────┬────────────────────────────┬────────────┬──────────────────────────┐
+│ (index) │ TABLE_NAME              │ COLUMN_NAME                │ DATA_TYPE  │ CHARACTER_MAXIMUM_LENGTH │
+├─────────┼─────────────────────────┼────────────────────────────┼────────────┼──────────────────────────┤
+│ 0       │ 'RIS_PENDIENTE_ARCHIVO' │ 'fecha_envio'              │ 'datetime' │ null                     │
+│ 1       │ 'RIS_PENDIENTE_ARCHIVO' │ 'fecha_lectura'            │ 'datetime' │ null                     │
+│ 2       │ 'RIS_PENDIENTE_ARCHIVO' │ 'id_archico'               │ 'bigint'   │ null                     │
+│ 3       │ 'RIS_PENDIENTE_ARCHIVO' │ 'id_ris_examen_canal'      │ 'bigint'   │ null                     │
+│ 4       │ 'RIS_PENDIENTE_ARCHIVO' │ 'id_tipo_mensaje'          │ 'int'      │ null                     │
+│ 5       │ 'RIS_PENDIENTE_ARCHIVO' │ 'id_usuario_envio'         │ 'bigint'   │ null                     │
+│ 6       │ 'RIS_PENDIENTE_ARCHIVO' │ 'id_usuario_lectura'       │ 'bigint'   │ null                     │
+│ 7       │ 'RIS_PENDIENTE_ARCHIVO' │ 'nombre'                   │ 'varchar'  │ 50                       │
+│ 8       │ 'SolicitudAddemdum'     │ 'Adjunto'                  │ 'varchar'  │ 250                      │
+│ 9       │ 'SolicitudAddemdum'     │ 'Comentario'               │ 'varchar'  │ 4000                     │
+│ 10      │ 'SolicitudAddemdum'     │ 'Detalle'                  │ 'varchar'  │ 4000                     │
+│ 11      │ 'SolicitudAddemdum'     │ 'EstadoSolicitudAdedemdum' │ 'int'      │ null                     │
+│ 12      │ 'SolicitudAddemdum'     │ 'FechaIngreso'             │ 'datetime' │ null                     │
+│ 13      │ 'SolicitudAddemdum'     │ 'FechaProceso'             │ 'date'     │ null                     │
+│ 14      │ 'SolicitudAddemdum'     │ 'FechaResolucion'          │ 'date'     │ null                     │
+│ 15      │ 'SolicitudAddemdum'     │ 'id'                       │ 'int'      │ null                     │
+│ 16      │ 'SolicitudAddemdum'     │ 'IdRisExamen'              │ 'bigint'   │ null                     │
+│ 17      │ 'SolicitudAddemdum'     │ 'IdTipoSolicitudAddendum'  │ 'int'      │ null                     │
+│ 18      │ 'SolicitudAddemdum'     │ 'Usuario'                  │ 'varchar'  │ 150                      │
+│ 19      │ 'SolicitudAddemdum'     │ 'UsuarioInstitucion'       │ 'int'      │ null                     │
+│ 20      │ 'SolicitudAddemdum'     │ 'UsuarioMail'              │ 'varchar'  │ 150                      │
+└─────────┴─────────────────────────┴────────────────────────────┴────────────┴──────────────────────────┘

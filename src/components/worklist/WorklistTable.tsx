@@ -25,7 +25,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Study } from '@/types/ris';
+import { Study, EnrichedStudy } from '@/types/ris';
 import { useDiagnosis } from '@/components/providers/DiagnosisProvider';
 import {
   DndContext,
@@ -103,7 +103,13 @@ const calculateElapsed = (studyDate: Date) => {
   return Math.floor(Math.abs(now.getTime() - fictitiousDbDate.getTime()) / 60000);
 };
 
-const SLABadge: React.FC<{ studyDate: Date, urgency: string }> = ({ studyDate, urgency }) => {
+const SLABadge: React.FC<{ 
+  studyDate: Date, 
+  urgency: string,
+  normalMins: number,
+  urgentMins: number,
+  critMins: number
+}> = ({ studyDate, urgency, normalMins, urgentMins, critMins }) => {
   const [elapsed, setElapsed] = useState(() => calculateElapsed(studyDate));
   
   useEffect(() => {
@@ -114,13 +120,15 @@ const SLABadge: React.FC<{ studyDate: Date, urgency: string }> = ({ studyDate, u
   let color = "bg-emerald-500";
   let label = "Normal";
   
-  // Lógica de Semáforo (Basada en urgencia y tiempo)
-  const isUrgent = urgency && urgency.toLowerCase().includes('urg');
-  
-  if (elapsed > 120 || (isUrgent && elapsed > 30)) { 
+  // Lógica dinámica de Semáforo basada en el Cerebro Administrativo (AMIS 3.0)
+  // AMIS 3.0 provée exactamente los minutos correctos basándose en la categoría clínica y modalidad
+  const limitCritical = critMins;
+  const limitUrgent = urgentMins;
+
+  if (elapsed >= limitCritical) { 
     color = "bg-rose-500 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.4)]"; 
     label = "CRÍTICO"; 
-  } else if (elapsed > 60 || (isUrgent && elapsed > 15)) { 
+  } else if (elapsed > limitUrgent) { 
     color = "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]"; 
     label = "ALERTA"; 
   }
@@ -150,9 +158,9 @@ const SLABadge: React.FC<{ studyDate: Date, urgency: string }> = ({ studyDate, u
   );
 };
 
-const columnHelper = createColumnHelper<Study>();
+const columnHelper = createColumnHelper<EnrichedStudy>();
 
-export default function WorklistTable({ data }: { data: Study[] }) {
+export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const { mode, toggleHighContrast } = useDiagnosis();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -164,16 +172,17 @@ export default function WorklistTable({ data }: { data: Study[] }) {
     const study = data?.find(s => s.id === selectedId);
     if (!study) return;
 
-    const meddreamUrl = `http://visor.amis.local/?study=${study.studyInstanceUID}`;
+    // Ajustado a la IP/Puerto local del Visor MedDream real que usabas en DictationClient: 
+    const meddreamUrl = `http://localhost:8080/meddream/?study=${study.studyInstanceUID || study.accessionNumber}`;
     console.log(`[MedDream Integration] URL Generated: ${meddreamUrl}`);
 
     // Abrir MedDream en Monitor 2 usando window.open (popup mode idealmente)
     // Pasamos el UID real del estudio
-    // const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
-    // window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
+    const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
+    window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
 
     // Navegar en el Monitor 1 a la interfaz de informe
-    // router.push(`/informe/${study.studyInstanceUID}`);
+    router.push(`/informe/${study.studyInstanceUID}`);
   };
 
   const columns = useMemo(() => [
@@ -190,7 +199,7 @@ export default function WorklistTable({ data }: { data: Study[] }) {
         </div>
       ),
     }),
-    columnHelper.accessor('institutionName', {
+    columnHelper.accessor('enrichedInstitutionName', {
       id: 'institutionName',
       header: 'INSTITUCIÓN',
       cell: info => <span className="text-[11px] font-bold text-white/80 uppercase truncate max-w-[150px] inline-block" title={String(info.getValue())}>{String(info.getValue())}</span>,
@@ -229,7 +238,13 @@ export default function WorklistTable({ data }: { data: Study[] }) {
     columnHelper.accessor('id' as any, {
        id: 'id',
        header: 'TIEMPO REAL',
-       cell: info => <SLABadge studyDate={info.row.original.studyDate} urgency={info.row.original.urgencyType} />,
+       cell: info => <SLABadge 
+         studyDate={info.row.original.studyDate} 
+         urgency={info.row.original.urgencyType} 
+         normalMins={info.row.original.expectedSLANormalMinutes}
+         urgentMins={info.row.original.expectedSLAUrgentMinutes}
+         critMins={info.row.original.expectedSLACriticalMinutes}
+       />,
     }),
     columnHelper.accessor('studyDescription', {
       id: 'studyDescription',
@@ -247,10 +262,10 @@ export default function WorklistTable({ data }: { data: Study[] }) {
         </div>
       ),
     }),
-    columnHelper.accessor('requestingPhysician', {
+    columnHelper.accessor('enrichedRadiologistName', {
       id: 'requestingPhysician',
       header: 'MÉDICO',
-      cell: info => <span className="text-[10px] uppercase font-bold text-text-muted truncate max-w-[120px] inline-block" title={String(info.getValue())}>{String(info.getValue()) || 'NO ESPECIFICADO'}</span>,
+      cell: info => <span className="text-[10px] uppercase font-bold text-text-muted truncate max-w-[120px] inline-block" title={String(info.getValue())}>{String(info.getValue()) || 'NO ASIGNADO'}</span>,
     }),
   ], []);
 
