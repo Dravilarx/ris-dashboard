@@ -54,6 +54,7 @@ export interface Study {
   reporterUsername: string;
   validatorUsername: string;
   technologist: string;
+  requestingPhysician: string;
 }
 
 /** Informe radiológico */
@@ -144,9 +145,14 @@ export interface WorklistFilters {
   dateFrom?: Date;
   /** Fecha fin del rango */
   dateTo?: Date;
+  /** Rango de tiempo predefinido */
+  timeRange?: 'today' | '24h' | 'all';
   /** Tipo de urgencia */
   urgencyType?: string;
 }
+
+/** Modos de visualización para diagnóstico */
+export type DiagnosisMode = 'dark' | 'high-contrast' | 'low-light';
 
 /** Parámetros de búsqueda typeahead */
 export interface SearchParams {

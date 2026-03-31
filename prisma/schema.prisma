@@ -579,69 +579,69 @@ model ris_estado_informe {
 
 model ris_examen {
   id_ris_examen             BigInt                  @id(map: "PK_ris_examen") @default(autoincrement())
-  id_examen_remoto          BigInt
-  codexamen                 String                  @db.VarChar(255)
-  aetitle                   String                  @db.VarChar(255)
-  numeroacceso              String                  @db.VarChar(20)
-  idpaciente                String                  @db.VarChar(1024)
-  nombre                    String                  @db.VarChar(1024)
-  apellidopaterno           String                  @db.VarChar(1024)
-  apellidomaterno           String                  @db.VarChar(1024)
-  fechanacimiento           DateTime                @db.DateTime
-  sexo                      String                  @db.VarChar(20)
-  fechaexamen               DateTime                @db.DateTime
-  modalidad                 String                  @db.VarChar(20)
-  descripcion               String                  @db.VarChar(1024)
+  remoteId                  BigInt                  @map("id_examen_remoto")
+  studyInstanceUID          String                  @map("codexamen") @db.VarChar(255)
+  aeTitle                   String                  @map("aetitle") @db.VarChar(255)
+  accessionNumber           String                  @map("numeroacceso") @db.VarChar(20)
+  patientId                 String                  @map("idpaciente") @db.VarChar(1024)
+  patientName               String                  @map("nombre") @db.VarChar(1024)
+  patientLastName           String                  @map("apellidopaterno") @db.VarChar(1024)
+  patientMotherLastName     String                  @map("apellidomaterno") @db.VarChar(1024)
+  birthDate                 DateTime                @map("fechanacimiento") @db.DateTime
+  sex                       String                  @map("sexo") @db.VarChar(20)
+  studyDate                 DateTime                @map("fechaexamen") @db.DateTime
+  modality                  String                  @map("modalidad") @db.VarChar(20)
+  description               String                  @map("descripcion") @db.VarChar(1024)
   id_estadoexamen           Int
   idradiologo               Int
   nombreradiologo           String                  @db.VarChar(255)
-  fechaasignacion           DateTime                @db.DateTime
-  edad                      String                  @db.VarChar(50)
-  idorden                   String                  @db.VarChar(50)
-  idtipoorden               String                  @db.VarChar(50)
-  medicosolicitante         String                  @db.VarChar(255)
-  fechavalidacion           DateTime                @db.DateTime
-  horaexamen                String                  @db.VarChar(16)
-  flagimagen                Int
-  usernameRadiologo         String                  @db.VarChar(255)
-  id_institucion            Int
-  id_estado_examen          Int?
-  id_estado_sincronizado    Int
-  bloqueado                 Int
-  fecha_bloqueo             DateTime                @db.DateTime
-  id_usuario_bloqueo        Int
-  instancias                Int
-  entregado                 Boolean
-  cantidad_instancias       Int
-  flag_correo_notifica      Int
+  assignmentDate            DateTime                @map("fechaasignacion") @db.DateTime
+  age                       String                  @map("edad") @db.VarChar(50)
+  orderId                   String                  @map("idorden") @db.VarChar(50)
+  orderTypeId               String                  @map("idtipoorden") @db.VarChar(50)
+  requestingPhysician       String                  @map("medicosolicitante") @db.VarChar(255)
+  validationDate            DateTime                @map("fechavalidacion") @db.DateTime
+  studyTime                 String                  @map("horaexamen") @db.VarChar(16)
+  hasImage                  Int                     @map("flagimagen")
+  radiologistUsername       String                  @map("usernameRadiologo") @db.VarChar(255)
+  institutionId             Int                     @map("id_institucion")
+  examStatusId              Int?                    @map("id_estado_examen")
+  syncStatusId              Int                     @map("id_estado_sincronizado")
+  isBlocked                 Int                     @map("bloqueado")
+  blockDate                 DateTime                @map("fecha_bloqueo") @db.DateTime
+  blockUserId               Int                     @map("id_usuario_bloqueo")
+  instances                 Int                     @map("instancias")
+  isDelivered               Boolean                 @map("entregado")
+  instanceCount             Int                     @map("cantidad_instancias")
+  emailNotifyFlag           Int                     @map("flag_correo_notifica")
   tecnologo                 String?                 @db.NVarChar(255)
-  idUsuarioValidadorExamen  BigInt?
-  idUsuarioInformadorExamen BigInt?
-  PoseePrestacionesBecado   Int?
-  IdUsuarioAsignado         BigInt?
-  id_estado_pendiente       Int
-  FECHA_CIERRE_PENDIENTE    DateTime?               @db.DateTime
+  validatorUserId           BigInt?                 @map("idUsuarioValidadorExamen")
+  reporterUserId            BigInt?                 @map("idUsuarioInformadorExamen")
+  hasBecadoBilling          Int?                    @map("PoseePrestacionesBecado")
+  assignedUserId            BigInt?                 @map("IdUsuarioAsignado")
+  pendingStatusId           Int                     @map("id_estado_pendiente")
+  pendingCloseDate          DateTime?               @map("FECHA_CIERRE_PENDIENTE") @db.DateTime
   log_lectura_examen        log_lectura_examen[]
-  ris_estado_examen         ris_estado_examen?      @relation(fields: [id_estado_examen], references: [id_estado_examen], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_es__66EA454A")
-  institucion               institucion             @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_exame__id_in__1BC821DD")
-  RIS_PENDIENTE_ESTADO      RIS_PENDIENTE_ESTADO    @relation(fields: [id_estado_pendiente], references: [id], onUpdate: NoAction, map: "FK_RIS_EXAMEN_RIS_ESTADO_PENDIENTE")
+  ris_estado_examen         ris_estado_examen?      @relation(fields: [examStatusId], references: [id_estado_examen], onDelete: NoAction, onUpdate: NoAction, map: "FK__ris_exame__id_es__66EA454A")
+  institucion               institucion             @relation(fields: [institutionId], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_exame__id_in__1BC821DD")
+  RIS_PENDIENTE_ESTADO      RIS_PENDIENTE_ESTADO    @relation(fields: [pendingStatusId], references: [id], onUpdate: NoAction, map: "FK_RIS_EXAMEN_RIS_ESTADO_PENDIENTE")
   ris_examen_prestacion     ris_examen_prestacion[]
   ris_log                   ris_log[]
 
-  @@index([aetitle], map: "examen_aetitle")
-  @@index([numeroacceso], map: "examen_numeroAcceso")
-  @@index([id_estado_examen], map: "id_ris_examen_codexamen_aetitle_numeroacceso")
-  @@index([fechaasignacion(sort: Desc)], map: "idx_fechaasignacion")
-  @@index([usernameRadiologo, id_estadoexamen], map: "idx_ris_usernameRadiologo_id_estadoexamen")
-  @@index([codexamen], map: "Indice-CodigoExamen-200320251800")
-  @@index([usernameRadiologo, idUsuarioValidadorExamen, idUsuarioInformadorExamen, IdUsuarioAsignado], map: "indx_username_ids_asignado_informador_validador")
-  @@index([idUsuarioValidadorExamen, idUsuarioInformadorExamen, IdUsuarioAsignado], map: "indx-idusuarios-20240826-165459")
-  @@index([fechaasignacion, codexamen], map: "IX_fnInformeContenido_Rango_fecha")
-  @@index([fechaasignacion, id_estado_examen, numeroacceso, idpaciente, nombre, descripcion, id_estado_pendiente, usernameRadiologo, id_institucion, modalidad, idtipoorden], map: "IX_ris_examen_Optimizado")
-  @@index([fechaasignacion, id_estado_examen, numeroacceso, idpaciente, nombre, descripcion, id_estado_pendiente, usernameRadiologo, id_institucion, modalidad, idtipoorden], map: "IX_ris_examen_Optimizado_2")
-  @@index([codexamen, aetitle], map: "OcidgoExamenAetittle-20250320-180240")
-  @@index([codexamen], map: "ris_examen_codexamen")
-  @@index([codexamen, aetitle, id_institucion], map: "ris_examen_codexamen_aetitle_idinstitucion")
+  @@index([aeTitle], map: "examen_aetitle")
+  @@index([accessionNumber], map: "examen_numeroAcceso")
+  @@index([examStatusId], map: "id_ris_examen_codexamen_aetitle_numeroacceso")
+  @@index([assignmentDate(sort: Desc)], map: "idx_fechaasignacion")
+  @@index([radiologistUsername, id_estadoexamen], map: "idx_ris_usernameRadiologo_id_estadoexamen")
+  @@index([studyInstanceUID], map: "Indice-CodigoExamen-200320251800")
+  @@index([radiologistUsername, validatorUserId, reporterUserId, assignedUserId], map: "indx_username_ids_asignado_informador_validador")
+  @@index([validatorUserId, reporterUserId, assignedUserId], map: "indx-idusuarios-20240826-165459")
+  @@index([assignmentDate, studyInstanceUID], map: "IX_fnInformeContenido_Rango_fecha")
+  @@index([assignmentDate, examStatusId, accessionNumber, patientId, patientName, description, pendingStatusId, radiologistUsername, institutionId, modality, orderTypeId], map: "IX_ris_examen_Optimizado")
+  @@index([assignmentDate, examStatusId, accessionNumber, patientId, patientName, description, pendingStatusId, radiologistUsername, institutionId, modality, orderTypeId], map: "IX_ris_examen_Optimizado_2")
+  @@index([studyInstanceUID, aeTitle], map: "OcidgoExamenAetittle-20250320-180240")
+  @@index([studyInstanceUID], map: "ris_examen_codexamen")
+  @@index([studyInstanceUID, aeTitle, institutionId], map: "ris_examen_codexamen_aetitle_idinstitucion")
 }
 
 model ris_examen_asignacion {
@@ -681,32 +681,32 @@ model ris_examen_radiologo_externo {
 
 model ris_informe {
   id_ris_informe                   BigInt                   @id(map: "PK__ris_info__E59B68F2FD229FB0") @default(autoincrement())
-  id_informe_remoto                BigInt?
-  id_paciente                      String?                  @db.VarChar(50)
-  username_radiologo               String?                  @db.VarChar(50)
-  fecha_validacion                 DateTime?                @db.DateTime
-  flag_patologia_grave             Int?
-  patologia_grave                  String                   @db.VarChar(500)
-  descripcion                      String                   @db.VarChar(1024)
-  codigo_his                       BigInt?
-  valor                            Int?
-  estado_sinconizacion             Int?
-  codExamen                        String                   @db.VarChar(255)
-  id_estado_informe                Int?
-  modalidad                        String                   @db.VarChar(50)
-  id_tipo_informe                  Int
-  id_institucion                   Int
-  id_UsernameRadiologoSegundaFirma Int?
-  id_patologia_grave               Int?
-  usuario_firma                    String?                  @db.VarChar(250)
-  ris_addendum                     ris_addendum[]
-  institucion                      institucion              @relation(fields: [id_institucion], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_infor__id_in__6BAEFA67")
-  tipo_informe                     tipo_informe             @relation(fields: [id_tipo_informe], references: [id_tipo_informe], onUpdate: NoAction, map: "FK__ris_infor__id_ti__6CA31EA0")
-  ris_informe_dato                 ris_informe_dato[]
-  ris_informe_prestacion           ris_informe_prestacion[]
+  remoteId                  BigInt?                  @map("id_informe_remoto")
+  patientId                 String?                  @map("id_paciente") @db.VarChar(50)
+  radiologistUsername       String?                  @map("username_radiologo") @db.VarChar(50)
+  validationDate            DateTime?                @map("fecha_validacion") @db.DateTime
+  isCritical                Int?                     @map("flag_patologia_grave")
+  criticalDescription       String                   @map("patologia_grave") @db.VarChar(500)
+  description               String                   @db.VarChar(1024)
+  hisCode                   BigInt?                  @map("codigo_his")
+  value                     Int?
+  syncStatus                Int?                     @map("estado_sinconizacion")
+  studyInstanceUID          String                   @map("codExamen") @db.VarChar(255)
+  reportStatusId            Int?                     @map("id_estado_informe")
+  modality                  String                   @db.VarChar(50)
+  reportTypeId              Int                      @map("id_tipo_informe")
+  institutionId             Int                      @map("id_institucion")
+  secondSignatureUserId     Int?                     @map("id_UsernameRadiologoSegundaFirma")
+  criticalPathologyId       Int?                     @map("id_patologia_grave")
+  signingUser               String?                  @map("usuario_firma") @db.VarChar(250)
+  ris_addendum              ris_addendum[]
+  institution               institucion              @relation(fields: [institutionId], references: [id_institucion], onUpdate: NoAction, map: "FK__ris_infor__id_in__6BAEFA67")
+  type                      tipo_informe             @relation(fields: [reportTypeId], references: [id_tipo_informe], onUpdate: NoAction, map: "FK__ris_infor__id_ti__6CA31EA0")
+  ris_informe_dato          ris_informe_dato[]
+  ris_informe_prestacion    ris_informe_prestacion[]
 
-  @@index([codExamen, id_estado_informe], map: "ris_informe_codexamen_idestadoinforme")
-  @@index([id_estado_informe], map: "ris_informe_idestadoinforme")
+  @@index([studyInstanceUID, reportStatusId], map: "ris_informe_codexamen_idestadoinforme")
+  @@index([reportStatusId], map: "ris_informe_idestadoinforme")
 }
 
 model ris_informe_dato {

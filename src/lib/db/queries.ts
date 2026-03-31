@@ -8,7 +8,8 @@
  * ⚠️ SOLO LECTURA — No ejecutar operaciones de escritura.
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import type {
   Study,
   Report,
@@ -61,6 +62,7 @@ function mapRowToStudy(row: Record<string, unknown>): Study {
     reporterUsername: String(row.UsuarioInformador ?? ""),
     validatorUsername: String(row.UsuarioValidador ?? ""),
     technologist: String(row.tecnologo ?? ""),
+    requestingPhysician: String(row.medicosolicitante ?? ""),
   };
 }
 
@@ -88,15 +90,29 @@ function mapRowToSearchResult(row: Record<string, unknown>): SearchResult {
  * Construye queries dinámicas con Prisma.sql para parametrización segura.
  */
 export async function getWorklist(
-  prisma: PrismaClient,
   pagination: PaginationParams = { page: 1, pageSize: 50 },
   filters: WorklistFilters = {}
 ): Promise<PaginatedResult<Study>> {
-  const { page, pageSize } = pagination;
-  const offset = (page - 1) * pageSize;
+  // Sanitización ultra-robusta para evitar NaN en MSSQL
+  const pSize = parseInt(String(pagination?.pageSize));
+  const pPage = parseInt(String(pagination?.page));
+  
+  const safePageSize = isNaN(pSize) ? 50 : Math.max(1, pSize);
+  const safePage = isNaN(pPage) ? 1 : Math.max(1, pPage);
+  const offset = (safePage - 1) * safePageSize;
+
+  // Lógica de Rango de Tiempo (Default: Hoy)
+  const timeRange = filters.timeRange || 'today';
+  let dateFilter: Prisma.Sql = Prisma.sql`1=1`;
+
+  if (timeRange === 'today') {
+    dateFilter = Prisma.sql`fechaexamen >= CAST(GETDATE() AS DATE)`;
+  } else if (timeRange === '24h') {
+    dateFilter = Prisma.sql`fechaexamen >= DATEADD(hour, -24, GETDATE())`;
+  }
 
   // Construir fragmentos SQL dinámicos
-  const conditions: Prisma.Sql[] = [Prisma.sql`1=1`];
+  const conditions: Prisma.Sql[] = [dateFilter];
 
   if (filters.examStatusId !== undefined) {
     conditions.push(Prisma.sql`id_estado_examen = ${filters.examStatusId}`);
@@ -125,23 +141,22 @@ export async function getWorklist(
   `;
   const total = Number(countResult[0]?.total ?? 0);
 
-  // Fetch page — OFFSET/FETCH requiere SQL crudo para inyectar números
-  const dataQuery = Prisma.sql`
+  // Fetch page — OFFSET/FETCH requiere SQL crudo para inyectar números directamente (MSSQL no los acepta como @P0)
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     SELECT *
     FROM View_Busqueda_Examen
     WHERE ${whereClause}
     ORDER BY fechaexamen DESC
-    OFFSET ${offset} ROWS
-    FETCH NEXT ${pageSize} ROWS ONLY
-  `;
-  const rows = await prisma.$queryRaw<Record<string, unknown>[]>(dataQuery);
+    OFFSET ${Prisma.raw(String(offset))} ROWS
+    FETCH NEXT ${Prisma.raw(String(safePageSize))} ROWS ONLY
+  `);
 
   return {
     data: rows.map(mapRowToStudy),
+    page: safePage,
+    pageSize: safePageSize,
     total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
+    totalPages: Math.ceil(total / safePageSize),
   };
 }
 
@@ -149,7 +164,6 @@ export async function getWorklist(
  * getStudyByUID — Detalle completo de un estudio por StudyInstanceUID (codexamen)
  */
 export async function getStudyByUID(
-  prisma: PrismaClient,
   studyInstanceUID: string
 ): Promise<Study | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
@@ -163,7 +177,6 @@ export async function getStudyByUID(
  * getStudyReports — Informes asociados a un estudio
  */
 export async function getStudyReports(
-  prisma: PrismaClient,
   studyInstanceUID: string
 ): Promise<Report[]> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
@@ -194,7 +207,6 @@ export async function getStudyReports(
  * getReportContent — Texto del informe radiológico
  */
 export async function getReportContent(
-  prisma: PrismaClient,
   reportId: number
 ): Promise<ReportContent[]> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
@@ -222,7 +234,6 @@ export async function getReportContent(
  * - Texto: busca por nombre del paciente
  */
 export async function searchStudies(
-  prisma: PrismaClient,
   params: { query: string; limit?: number }
 ): Promise<SearchResult[]> {
   const { query, limit = 15 } = params;
@@ -272,8 +283,8 @@ export async function searchStudies(
 /**
  * getExamStatuses — Catálogo de estados de examen
  */
-export async function getExamStatuses(prisma: PrismaClient) {
-  return prisma.ris_estado_examen.findMany({
+export async function getExamStatuses() {
+  return (prisma as any).ris_estado_examen.findMany({
     orderBy: { orden: "asc" },
   });
 }
@@ -281,8 +292,8 @@ export async function getExamStatuses(prisma: PrismaClient) {
 /**
  * getInstitutions — Catálogo de instituciones activas
  */
-export async function getInstitutions(prisma: PrismaClient) {
-  return prisma.institucion.findMany({
+export async function getInstitutions() {
+  return (prisma as any).institucion.findMany({
     where: { estado: 1 },
     select: {
       id_institucion: true,
@@ -297,8 +308,8 @@ export async function getInstitutions(prisma: PrismaClient) {
 /**
  * getModalities — Catálogo de modalidades activas
  */
-export async function getModalities(prisma: PrismaClient) {
-  return prisma.modalidad.findMany({
+export async function getModalities() {
+  return (prisma as any).modalidad.findMany({
     where: { estado: 1 },
     orderBy: { nombre: "asc" },
   });
