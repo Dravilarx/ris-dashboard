@@ -168,7 +168,7 @@ export async function fetchEnrichedWorklist(
   const mappings = await fetchMappingsFromAmis3();
 
   // 3. Enriquecimiento y Garantía de Datos
-  const enrichedData: EnrichedStudy[] = legacyResult.data.map((study) => {
+  const enrichedData: EnrichedStudy[] = legacyResult.data.map((study, index) => {
     // Si la DB tiene mapeado en study un id_radiologo, lo usaríamos. Como fallback usamos un parse simple.
     // Usaremos el ID = 1 para forzar la prueba de fuego de AMIS como se solicitó "Si es el Legacy 1..."
     // asumiendo que el ID de la institución es 1.
@@ -201,6 +201,12 @@ export async function fetchEnrichedWorklist(
     const urgentMins = Math.floor(expectedMins * 0.75); // 75% del SLA
     const normalMins = expectedMins;
 
+    // ----- MOCK UI PRESENTATION -----
+    let mockPriorityReturn = false;
+    if (index === 0) {
+      mockPriorityReturn = true; // Primer estudio simulado como retorno urgente de pausa B2B
+    }
+
     return {
       ...study,
       enrichedRadiologistName: realDoctor,
@@ -208,10 +214,17 @@ export async function fetchEnrichedWorklist(
       expectedSLACriticalMinutes: criticalMins,
       expectedSLAUrgentMinutes: urgentMins,
       expectedSLANormalMinutes: normalMins,
+      isHighPriorityReturn: mockPriorityReturn,
       // ─── IDENTIDAD ADAPTATIVA ────────────────────────────────
       ...resolveAdaptiveIdentity(study, mappings.centerIdentities),
     };
   });
+
+  // MOCK HISTORY DATA FOR SECOND STUDY
+  if (enrichedData.length > 1) {
+    enrichedData[1].effectivePatientId = enrichedData[0].effectivePatientId;
+    enrichedData[1].patientId = enrichedData[0].patientId;
+  }
 
   return {
     ...legacyResult,

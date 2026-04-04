@@ -32,12 +32,42 @@ import { StudyFile } from '@/lib/server/services/legacyRisService';
 
 export default function DictationClient({ study, annexes }: { study: EnrichedStudy, annexes: StudyFile[] }) {
   const [sections, setSections] = useState({ technique: '', history: '', findings: '', impression: '' });
+  const [baseSections, setBaseSections] = useState({ technique: '', history: '', findings: '', impression: '' });
+  const [highlightColor, setHighlightColor] = useState('text-amber-400');
   const [activeSection, setActiveSection] = useState<'technique' | 'history' | 'findings' | 'impression'>('findings');
   const sectionRefs = {
     technique: useRef<HTMLTextAreaElement>(null),
     history: useRef<HTMLTextAreaElement>(null),
     findings: useRef<HTMLTextAreaElement>(null),
     impression: useRef<HTMLTextAreaElement>(null),
+  };
+
+  // Naive text difference renderer for visual highlights
+  const renderDiff = (original: string, current: string) => {
+    if (original === current) return <span className="text-white/60">{current}</span>;
+    if (!original) return <span className={highlightColor}>{current}</span>;
+
+    let startMatch = 0;
+    while (startMatch < original.length && startMatch < current.length && original[startMatch] === current[startMatch]) {
+      startMatch++;
+    }
+
+    let endMatchOriginal = original.length - 1;
+    let endMatchCurrent = current.length - 1;
+    while (endMatchOriginal >= startMatch && endMatchCurrent >= startMatch && original[endMatchOriginal] === current[endMatchCurrent]) {
+      endMatchOriginal--;
+      endMatchCurrent--;
+    }
+
+    const currentMiddle = current.slice(startMatch, endMatchCurrent + 1);
+
+    return (
+      <>
+        <span className="text-white/60">{current.substring(0, startMatch)}</span>
+        {currentMiddle && <span className={highlightColor}>{currentMiddle}</span>}
+        <span className="text-white/60">{current.substring(endMatchCurrent + 1)}</span>
+      </>
+    );
   };
   // ─── AMIS ROLE SYSTEM ────────────────────────────────────────────────────
   type AmisRole = 'MED_STAFF' | 'MED_CHIEF' | 'MED_RESIDENT' | 'MED_REQUIRES_COSIGN';
@@ -382,13 +412,19 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
     if (!technique && !history && !findings && !impression) {
        setSections(prev => ({ ...prev, [activeSection]: prev[activeSection] + (prev[activeSection] ? "\n" : "") + text.trim() }));
     } else {
-       setSections(prev => ({
-         ...prev,
-         technique: technique || prev.technique,
-         history: history || prev.history,
-         findings: findings || prev.findings,
-         impression: impression || prev.impression
-       }));
+       const newSections = {
+         technique: technique || sections.technique,
+         history: history || sections.history,
+         findings: findings || sections.findings,
+         impression: impression || sections.impression
+       };
+       setSections(newSections);
+       setBaseSections({
+         technique: technique,
+         history: history,
+         findings: findings,
+         impression: impression
+       });
     }
     setShowTemplates(false);
   };
@@ -1036,6 +1072,24 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                   <Command size={14} /> Plantillas
                 </button>
                 <button 
+                  onClick={() => {
+                    const colors = ['text-amber-400', 'text-purple-400', 'text-rose-400', 'text-cyan-400'];
+                    const currentIdx = colors.indexOf(highlightColor);
+                    setHighlightColor(colors[(currentIdx + 1) % colors.length]);
+                  }}
+                  className={`flex items-center justify-center w-8 h-8 rounded-md border border-white/10 transition-all bg-white/5 hover:bg-white/10 ${highlightColor}`}
+                  title="Cambiar Color de Resaltado"
+                >
+                  <div className={`w-3 h-3 rounded-full bg-current`} />
+                </button>
+                <button 
+                  onClick={() => setBaseSections(sections)}
+                  className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded-md border border-white/10 transition-all"
+                  title="Reset visual: Asentar todo el texto modificado a color base"
+                >
+                  <CheckCircle2 size={14} /> Refrescar Color
+                </button>
+                <button 
                   onClick={handleAIReview}
                   disabled={isReviewingAI}
                   className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(168,85,247,0.2)] border border-purple-500/30 ${isReviewingAI ? 'bg-purple-900/50 text-purple-300 animate-pulse' : 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'}`}
@@ -1113,78 +1167,102 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
            <div className="flex-1 px-16 py-12 relative overflow-hidden flex justify-center">
               
               <div className="w-full max-w-5xl mx-auto flex flex-col gap-5 px-4 pt-6 pb-28 custom-scrollbar overflow-y-auto">
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 relative">
                   <span className="text-xs font-black text-cyan-500/50 uppercase tracking-[0.3em] mb-4 block border-b border-white/10 pb-2">
                     INFORME RADIOLÓGICO
                   </span>
                   
-                  <div className={`flex flex-col transition-all duration-300 ${activeSection === 'technique' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
+                  <div className={`flex flex-col transition-all duration-300 relative ${activeSection === 'technique' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
                     <span className="text-[10px] font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-2">
                        TÉCNICA DE ESTUDIO
                        {activeSection === 'technique' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <textarea
-                       ref={sectionRefs.technique}
-                       value={sections.technique}
-                       onChange={e => setSections(p => ({...p, technique: e.target.value}))}
-                       onFocus={() => setActiveSection('technique')}
-                       spellCheck={true}
-                       lang="es"
-                       className="w-full h-auto min-h-[60px] bg-transparent outline-none resize-none p-0 text-[18px] leading-[1.7] text-slate-100 font-medium font-sans tracking-wide"
-                       placeholder="Describa la técnica..."
-                    />
+                    <div className="relative w-full h-auto min-h-[60px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
+                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                         {renderDiff(baseSections.technique, sections.technique)}     
+                      </div>
+                      <textarea
+                         ref={sectionRefs.technique}
+                         value={sections.technique}
+                         onChange={e => setSections(p => ({...p, technique: e.target.value}))}
+                         onFocus={() => setActiveSection('technique')}
+                         spellCheck={true}
+                         lang="es"
+                         className="relative w-full h-full min-h-[60px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         placeholder="Describa la técnica..."
+                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                      />
+                    </div>
                   </div>
                   
-                  <div className={`flex flex-col transition-all duration-300 mt-8 ${activeSection === 'history' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
+                  <div className={`flex flex-col transition-all duration-300 mt-8 relative ${activeSection === 'history' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
                     <span className="text-[10px] font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-2">
                        ANTECEDENTES
                        {activeSection === 'history' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <textarea
-                       ref={sectionRefs.history}
-                       value={sections.history}
-                       onChange={e => setSections(p => ({...p, history: e.target.value}))}
-                       onFocus={() => setActiveSection('history')}
-                       spellCheck={true}
-                       lang="es"
-                       className="w-full h-auto min-h-[60px] bg-transparent outline-none resize-none p-0 text-[18px] leading-[1.7] text-slate-100 font-medium font-sans tracking-wide"
-                       placeholder="Indique antecedentes relevantes..."
-                    />
+                    <div className="relative w-full h-auto min-h-[60px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
+                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                         {renderDiff(baseSections.history, sections.history)}
+                      </div>
+                      <textarea
+                         ref={sectionRefs.history}
+                         value={sections.history}
+                         onChange={e => setSections(p => ({...p, history: e.target.value}))}
+                         onFocus={() => setActiveSection('history')}
+                         spellCheck={true}
+                         lang="es"
+                         className="relative w-full h-full min-h-[60px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         placeholder="Indique antecedentes relevantes..."
+                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                      />
+                    </div>
                   </div>
                   
-                  <div className={`flex flex-col transition-all duration-300 mt-8 ${activeSection === 'findings' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
+                  <div className={`flex flex-col transition-all duration-300 mt-8 relative ${activeSection === 'findings' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
                     <span className="text-[10px] font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-2">
                        HALLAZGOS
                        {activeSection === 'findings' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <textarea
-                       autoFocus
-                       ref={sectionRefs.findings}
-                       value={sections.findings}
-                       onChange={e => setSections(p => ({...p, findings: e.target.value}))}
-                       onFocus={() => setActiveSection('findings')}
-                       spellCheck={true}
-                       lang="es"
-                       className="w-full min-h-[160px] bg-transparent outline-none resize-none p-0 text-[18px] leading-[1.7] text-slate-100 font-medium font-sans tracking-wide"
-                       placeholder="Describa los hallazgos principales..."
-                    />
+                    <div className="relative w-full min-h-[160px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
+                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                        {renderDiff(baseSections.findings, sections.findings)}
+                      </div>
+                      <textarea
+                         autoFocus
+                         ref={sectionRefs.findings}
+                         value={sections.findings}
+                         onChange={e => setSections(p => ({...p, findings: e.target.value}))}
+                         onFocus={() => setActiveSection('findings')}
+                         spellCheck={true}
+                         lang="es"
+                         className="relative w-full h-full min-h-[160px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         placeholder="Describa los hallazgos principales..."
+                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                      />
+                    </div>
                   </div>
 
-                  <div className={`flex flex-col transition-all duration-300 mt-8 ${activeSection === 'impression' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
+                  <div className={`flex flex-col transition-all duration-300 mt-8 relative ${activeSection === 'impression' ? 'opacity-100' : 'opacity-60 hover:opacity-80'}`}>
                     <span className="text-[10px] font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-2">
                        IMPRESIÓN DIAGNÓSTICA
                        {activeSection === 'impression' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <textarea
-                       ref={sectionRefs.impression}
-                       value={sections.impression}
-                       onChange={e => setSections(p => ({...p, impression: e.target.value}))}
-                       onFocus={() => setActiveSection('impression')}
-                       spellCheck={true}
-                       lang="es"
-                       className="w-full min-h-[120px] bg-transparent outline-none resize-none p-0 text-[18px] leading-[1.7] text-slate-100 font-medium font-sans tracking-wide"
-                       placeholder="Conclusión del estudio..."
-                    />
+                    <div className="relative w-full min-h-[120px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
+                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                         {renderDiff(baseSections.impression, sections.impression)}
+                      </div>
+                      <textarea
+                         ref={sectionRefs.impression}
+                         value={sections.impression}
+                         onChange={e => setSections(p => ({...p, impression: e.target.value}))}
+                         onFocus={() => setActiveSection('impression')}
+                         spellCheck={true}
+                         lang="es"
+                         className="relative w-full h-full min-h-[120px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         placeholder="Conclusión del estudio..."
+                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1336,7 +1414,10 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     </button>
 
                     <button 
-                      onClick={() => setShowPreview(true)}
+                      onClick={() => {
+                        setBaseSections(sections);
+                        setShowPreview(true);
+                      }}
                       className="px-6 py-2.5 rounded-xl font-bold text-xs text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all tracking-widest flex items-center gap-2"
                     >
                       <Eye size={16} /> VISTA PREVIA PDF
@@ -1351,15 +1432,10 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     </button>
 
                     <button 
-                      onClick={() => setIsPendingCenterModalOpen(true)}
-                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all tracking-widest flex items-center gap-2"
-                      title="Enviar a Portal B2B para acción del cliente"
-                    >
-                      <AlertCircle size={16} /> ENVIAR A B2B
-                    </button>
-
-                    <button 
-                      onClick={() => handleUpdateStatus('REPORTED')}
+                      onClick={() => {
+                        setBaseSections(sections);
+                        handleUpdateStatus('REPORTED');
+                      }}
                       disabled={!isAllFilled || criticalAnswer === null}
                       className="px-6 py-2.5 rounded-xl font-black text-xs text-white bg-blue-500 hover:bg-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] tracking-widest"
                       title={criticalAnswer === null ? "Debe responder la Pausa Clínica" : "Informar Estudio"}
@@ -1371,7 +1447,10 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     {canSign ? (
                       /* MED_STAFF / MED_CHIEF → Primary green sign button */
                       <button 
-                        onClick={() => setShowSignModal(true)}
+                        onClick={() => {
+                          setBaseSections(sections);
+                          setShowSignModal(true);
+                        }}
                         disabled={!isAllFilled || criticalAnswer === null}
                         className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-[#39FF14] hover:bg-[#32e612] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(57,255,20,0.3)] hover:shadow-[0_0_20px_rgba(57,255,20,0.5)] tracking-widest flex items-center gap-2"
                         title={criticalAnswer === null ? 'Debe responder la Pausa Clínica' : 'Validar y Firmar como Responsable Legal'}
@@ -1612,7 +1691,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                                   </div>
                                   <div className="flex gap-4">
                                      <div className="flex flex-col">
-                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">RUT</span>
+                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{study.patientIdLabel || 'RUT'}</span>
                                         <span className="text-[10px] font-mono font-bold text-slate-800">{study.patientId}</span>
                                      </div>
                                      <div className="flex flex-col">

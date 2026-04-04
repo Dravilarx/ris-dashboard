@@ -252,7 +252,34 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Web Push Notification for recovered studies
+    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+
+    const studyChannel = supabase
+      .channel('ready-status-scanner')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'multiris_production' }, (payload) => {
+          const oldStatus = payload.old?.status;
+          const newStatus = payload.new?.status;
+          // Asumiendo que READY es 'REPORTING' or 'PENDING_VALIDATION' etc, 
+          // Ajustado al modelo de 'PAUSA' -> vuelve a estado operable:
+          if (oldStatus === 'PENDING_CENTER_ACTION' && newStatus !== 'PENDING_CENTER_ACTION') {
+              if ('Notification' in window && Notification.permission === 'granted') {
+                 const pacName = payload.new?.paciente_nombre || 'Desconocido';
+                 new Notification('Retorno Prioritario', {
+                    body: `Estudio de ${pacName} listo para reportar (recuperado de Pausa).`,
+                    icon: '/favicon.ico'
+                 });
+              }
+          }
+      })
+      .subscribe();
+
+    return () => { 
+      supabase.removeChannel(channel); 
+      supabase.removeChannel(studyChannel);
+    };
   }, [fetchPendingAddendums]);
   // ─────────────────────────────────────────────────────────────────────────
 
