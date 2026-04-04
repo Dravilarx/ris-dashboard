@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, FileDigit, ScanFace, Sparkles,
   Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Maximize, Clock, Stethoscope,
   Plus, Edit2, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Wifi, Loader2,
-  LayoutGrid, List, Columns, ExternalLink, Layout, Minimize2
+  LayoutGrid, List, Columns, ExternalLink, Layout, Minimize2, Eye, Printer, User, Calendar, ClipboardList
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react'; 
 import { supabase } from '@/lib/supabase';
@@ -51,6 +51,48 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [pendingReason, setPendingReason] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showSignModal, setShowSignModal] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  
+  // ─── HISTORIAL PREVIO — SEMÁFORO DE ACCESO ─────────────────────────────────
+  // Gris  = sin historial detectado
+  // Azul  = historial disponible, cargando/pendiente de verificación IRAD
+  // Verde = historial completo cargado, acceso total habilitado
+  type HistorialStatus = 'sin-historial' | 'cargando' | 'disponible';
+  const [historialStatus, setHistorialStatus] = useState<HistorialStatus>('sin-historial');
+  const [previosStudies, setPreviosStudies] = useState<Array<{
+    uid: string; description: string; date: string; modality: string;
+    hasPdf: boolean; hasImages: boolean; pdfUrl?: string; imageUrl?: string;
+  }>>([]);
+
+  // Simula la consulta de historial previo al montar (en prod: llamar a adaptive-search API)
+  useEffect(() => {
+    const effectiveId = study.effectivePatientId || study.patientId;
+    if (!effectiveId) return;
+    setHistorialStatus('cargando');
+    // Simulated delay for IRAD/legacy query
+    const timer = setTimeout(() => {
+      // Mock: si el ID tiene dígitos, simula que encontró estudios
+      const hasPrev = effectiveId.replace(/\D/g,'').length > 3;
+      if (hasPrev) {
+        setPreviosStudies([
+          { uid: 'prev-1', description: 'TAC DE TÓRAX SIN CONTRASTE', date: '2025-11-14', modality: 'CT', hasPdf: true, hasImages: true, pdfUrl: '#', imageUrl: '#' },
+          { uid: 'prev-2', description: 'RADIOGRAFÍA DE TÓRAX PA', date: '2025-08-22', modality: 'CR', hasPdf: true, hasImages: false, pdfUrl: '#' },
+          { uid: 'prev-3', description: 'ECOGRAFIA ABDOMINAL', date: '2025-03-05', modality: 'US', hasPdf: false, hasImages: true, imageUrl: '#' },
+        ]);
+        setHistorialStatus('disponible');
+      } else {
+        setPreviosStudies([]);
+        setHistorialStatus('sin-historial');
+      }
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [study.effectivePatientId, study.patientId]);
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // B2B PENDING ACTION STATES
+  const [isPendingCenterModalOpen, setIsPendingCenterModalOpen] = useState(false);
+  const [pendingCenterCategory, setPendingCenterCategory] = useState('');
+  const [pendingCenterMessage, setPendingCenterMessage] = useState('');
 
   // REMOTE DICTATION STATES
   const [showRemoteQR, setShowRemoteQR] = useState(false);
@@ -64,20 +106,42 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
 
   // ─── ADDENDUM / INTERCONSULTA ALERT ──────────────────────────────────────
   // Holds the active PENDING addendum request for this study, if any
-  type AddendumRequest = { id: string; request_text: string; requester_name: string | null };
+  type AddendumRequest = { id: string; request_text: string; requester_name: string | null; status: string };
   const [addendumRequest, setAddendumRequest] = useState<AddendumRequest | null>(null);
+  
+  // Mock current user for demo consistency with Worklist
+  const currentMedicName = 'DR. MARCELO AVILA';
 
   useEffect(() => {
     if (!study.studyInstanceUID) return;
 
-    // Initial fetch
-    supabase
-      .from('addendum_requests')
-      .select('id, request_text, requester_name')
-      .eq('study_uid', study.studyInstanceUID)
-      .eq('status', 'PENDING')
-      .maybeSingle()
-      .then(({ data }) => setAddendumRequest(data ?? null));
+    // Initial fetch of relevant addendum requests (unresolved)
+    const fetchAddendum = async () => {
+      const { data } = await supabase
+        .from('addendum_requests')
+        .select('id, request_text, requester_name, status')
+        .eq('study_uid', study.studyInstanceUID)
+        .in('status', ['TRIAGE_PENDING', 'ASSIGNED_TO_MEDIC'])
+        .maybeSingle();
+
+      if (data) {
+        // Alerta visible si está asignado a mí o pendiente de triage (y yo lo estoy revisando)
+        const isForMe = data.status === 'ASSIGNED_TO_MEDIC' && 
+                        data.requester_name?.toUpperCase() === currentMedicName.toUpperCase();
+        
+        const isInternalReview = data.status === 'TRIAGE_PENDING';
+
+        if (isForMe || isInternalReview) {
+          setAddendumRequest(data);
+        } else {
+          setAddendumRequest(null);
+        }
+      } else {
+        setAddendumRequest(null);
+      }
+    };
+
+    fetchAddendum();
 
     // Realtime subscription for this specific study
     const ch = supabase
@@ -90,15 +154,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
           table: 'addendum_requests',
           filter: `study_uid=eq.${study.studyInstanceUID}`
         },
-        async () => {
-          const { data } = await supabase
-            .from('addendum_requests')
-            .select('id, request_text, requester_name')
-            .eq('study_uid', study.studyInstanceUID)
-            .eq('status', 'PENDING')
-            .maybeSingle();
-          setAddendumRequest(data ?? null);
-        }
+        () => fetchAddendum()
       )
       .subscribe();
 
@@ -469,9 +525,15 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       content: getFullText(),
       userRole,
       pendingReason: reason || null,
+      pendingMessage: pendingCenterMessage || null,
       critical_alert: criticalAnswer === true ? { active: true, pathology: criticalPathology } : null,
       // Resident metadata for supervision inbox
       ...(isResident && { draft_author_role: userRole }),
+      // For B2B actions, record who sent it (Staff only name for transparency)
+      ...(status === 'PENDING_CENTER_ACTION' && { 
+        supervisor_name: currentMedicName,
+        pending_category: pendingCenterCategory 
+      }),
     };
 
     try {
@@ -498,6 +560,9 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         } else if (effectiveStatus === 'PENDING_INFO') {
           setIsPendingModalOpen(false);
           window.location.href = '/dashboard';
+        } else if (effectiveStatus === 'PENDING_CENTER_ACTION') {
+          setIsPendingCenterModalOpen(false);
+          window.location.href = '/dashboard?pending_center=1';
         } else {
           alert('Borrador Guardado Exitosamente (Estado REPORTED)');
         }
@@ -684,7 +749,20 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       <div className="grid grid-cols-2 gap-4">
                          <div className="flex flex-col">
                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Identificación</span>
-                           <span className="text-sm font-mono mt-0.5 text-slate-200">{study.patientId}</span>
+                           <div className="flex items-center gap-2 mt-0.5">
+                             <span className="text-sm font-mono text-slate-200">
+                               {study.effectivePatientId || study.patientId}
+                             </span>
+                             <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-[0.15em] border ${
+                               study.patientIdSource === 'NUM_COBRE'
+                                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                                 : study.patientIdSource === 'EXTERNAL_ID'
+                                   ? 'bg-purple-500/15 border-purple-500/30 text-purple-400'
+                                   : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400'
+                             }`}>
+                               {study.patientIdLabel || 'RUT'}
+                             </span>
+                           </div>
                          </div>
                          <div className="flex flex-col">
                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Edad / Sexo</span>
@@ -697,16 +775,86 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       </div>
                     </section>
 
-                    <section>
-                      <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-500 mb-2 flex items-center gap-2">
-                        <FileText size={12} /> Historia Clínica
-                      </h3>
-                      <div className="p-3 bg-black/40 rounded-xl border border-white/5 max-h-[100px] overflow-y-auto">
-                         <p className="text-sm text-slate-300 leading-relaxed font-medium">
-                           {study.clinicalHistory || 'Sin antecedentes proporcionados por la institución de origen.'}
-                         </p>
-                      </div>
-                    </section>
+                     <section>
+                       <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-500 mb-2 flex items-center gap-2">
+                         <FileText size={12} /> Historia Clínica
+                       </h3>
+                       <div className="p-3 bg-black/40 rounded-xl border border-white/5 max-h-[80px] overflow-y-auto">
+                          <p className="text-sm text-slate-300 leading-relaxed font-medium">
+                            {study.clinicalHistory || 'Sin antecedentes proporcionados por la institución de origen.'}
+                          </p>
+                       </div>
+                     </section>
+
+                     {/* ──────── PANEL HISTORIAL PREVIO — SEMÁFORO ──────── */}
+                     <section>
+                       <div className="flex items-center justify-between mb-2">
+                         <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-500 flex items-center gap-2">
+                           <Clock size={12} /> Estudios Previos
+                         </h3>
+                         {/* SEMÁFORO */}
+                         <div className="flex items-center gap-1.5">
+                           <div className={`w-2.5 h-2.5 rounded-full transition-all duration-500 ${
+                             historialStatus === 'disponible' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' :
+                             historialStatus === 'cargando'   ? 'bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(96,165,250,0.5)]' :
+                             'bg-slate-600'
+                           }`} />
+                           <span className={`text-[8px] font-black uppercase tracking-widest ${
+                             historialStatus === 'disponible' ? 'text-emerald-400' :
+                             historialStatus === 'cargando'   ? 'text-blue-400' :
+                             'text-slate-600'
+                           }`}>
+                             {historialStatus === 'disponible' ? `${previosStudies.length} PREVIOS` :
+                              historialStatus === 'cargando'   ? 'BUSCANDO...' :
+                              'SIN HISTORIAL'}
+                           </span>
+                         </div>
+                       </div>
+                       {historialStatus === 'disponible' && previosStudies.length > 0 && (
+                         <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                           {previosStudies.map(prev => (
+                             <div key={prev.uid} className="p-2 rounded-xl bg-emerald-500/5 border border-emerald-500/20 hover:border-emerald-500/40 transition-all group">
+                               <div className="flex items-start justify-between gap-1">
+                                 <div className="flex flex-col min-w-0">
+                                   <span className="text-[10px] font-bold text-white/80 truncate">{prev.description}</span>
+                                   <div className="flex items-center gap-1.5 mt-0.5">
+                                     <span className="text-[8px] font-mono text-slate-500">{prev.date}</span>
+                                     <span className="text-[8px] font-black text-cyan-500/70 border border-cyan-500/20 bg-cyan-500/5 px-1 rounded">{prev.modality}</span>
+                                   </div>
+                                 </div>
+                                 <div className="flex items-center gap-1 shrink-0">
+                                   {prev.hasImages && (
+                                     <a href={prev.imageUrl || '#'} target="_blank" rel="noopener noreferrer"
+                                        title="Abrir imágenes en visor"
+                                        className="p-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20 transition-colors">
+                                       <Monitor size={10} />
+                                     </a>
+                                   )}
+                                   {prev.hasPdf && (
+                                     <a href={prev.pdfUrl || '#'} target="_blank" rel="noopener noreferrer"
+                                        title="Abrir PDF de informe previo"
+                                        className="p-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
+                                       <FileText size={10} />
+                                     </a>
+                                   )}
+                                 </div>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       )}
+                       {historialStatus === 'cargando' && (
+                         <div className="py-3 flex items-center justify-center gap-2 text-blue-400/60">
+                           <Loader2 size={14} className="animate-spin" />
+                           <span className="text-[10px] font-bold">Consultando IRAD y registros previos...</span>
+                         </div>
+                       )}
+                       {historialStatus === 'sin-historial' && (
+                         <div className="py-2 text-center text-slate-600 text-[9px] font-bold uppercase tracking-widest">
+                           Sin estudios previos detectados
+                         </div>
+                       )}
+                     </section>
                  </div>
 
                  {/* Carrusel de Anexos (Filmstrip Visual) */}
@@ -1188,6 +1336,29 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     </button>
 
                     <button 
+                      onClick={() => setShowPreview(true)}
+                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all tracking-widest flex items-center gap-2"
+                    >
+                      <Eye size={16} /> VISTA PREVIA PDF
+                    </button>
+
+                    <button 
+                      onClick={() => setIsPendingCenterModalOpen(true)}
+                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all tracking-widest flex items-center gap-2"
+                      title="Enviar a Portal B2B para acción del cliente"
+                    >
+                      <AlertCircle size={16} /> ENVIAR A B2B
+                    </button>
+
+                    <button 
+                      onClick={() => setIsPendingCenterModalOpen(true)}
+                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all tracking-widest flex items-center gap-2"
+                      title="Enviar a Portal B2B para acción del cliente"
+                    >
+                      <AlertCircle size={16} /> ENVIAR A B2B
+                    </button>
+
+                    <button 
                       onClick={() => handleUpdateStatus('REPORTED')}
                       disabled={!isAllFilled || criticalAnswer === null}
                       className="px-6 py-2.5 rounded-xl font-black text-xs text-white bg-blue-500 hover:bg-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] tracking-widest"
@@ -1290,7 +1461,235 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                  )}
               </AnimatePresence>
 
+              {/* Modal Enviar a Pendiente (Portal B2B) */}
+              <AnimatePresence>
+                  {isPendingCenterModalOpen && (
+                     <motion.div 
+                       initial={{ opacity: 0 }} 
+                       animate={{ opacity: 1 }} 
+                       exit={{ opacity: 0 }}
+                       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+                     >
+                        <motion.div 
+                          initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                          animate={{ scale: 1, opacity: 1, y: 0 }}
+                          exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                          className="w-full max-w-lg bg-[#050810] border border-rose-500/20 rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(244,63,94,0.2)] flex flex-col"
+                        >
+                           <div className="p-6 border-b border-white/5 bg-gradient-to-r from-rose-500/10 to-transparent">
+                              <div className="flex items-center gap-3 mb-1">
+                                 <AlertCircle size={20} className="text-rose-500" />
+                                 <span className="text-lg font-black text-white uppercase tracking-tight">Enviar a Pendiente (B2B)</span>
+                              </div>
+                              <p className="text-xs text-slate-400">Solicitud de acción requerida por parte del Centro Cliente.</p>
+                           </div>
+                           
+                           <div className="p-6 flex flex-col gap-5 bg-white/[0.01]">
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Categoría del Pendiente</label>
+                                <select 
+                                  value={pendingCenterCategory}
+                                  onChange={e => setPendingCenterCategory(e.target.value)}
+                                  className="w-full bg-black border border-white/10 rounded-xl p-3 text-sm text-slate-200 outline-none focus:border-rose-500/50"
+                                >
+                                   <option value="">Seleccione Categoría...</option>
+                                   <option value="Examen incompleto">Examen incompleto</option>
+                                   <option value="Faltan antecedentes">Faltan antecedentes</option>
+                                   <option value="Imagen corrupta/ilegible">Imagen corrupta / ilegible</option>
+                                   <option value="Requiere validación administrativa">Requiere validación administrativa</option>
+                                   <option value="Otro">Otro motivo...</option>
+                                </select>
+                              </div>
+                              
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Mensaje para el Cliente</label>
+                                <textarea 
+                                   value={pendingCenterMessage}
+                                   onChange={e => setPendingCenterMessage(e.target.value)}
+                                   placeholder="Detalle exactamente qué necesita del centro cliente..."
+                                   className="w-full h-32 bg-black border border-white/10 rounded-xl p-4 text-sm text-slate-200 outline-none focus:border-rose-500/50 resize-none font-medium"
+                                />
+                                <p className="text-[9px] text-slate-600 italic">Este mensaje será visible por el cliente y firmado por: <span className="text-slate-400 font-bold">{currentMedicName}</span></p>
+                              </div>
+                           </div>
+
+                           <div className="p-5 bg-black border-t border-white/5 flex items-center justify-end gap-3">
+                              <button 
+                                onClick={() => setIsPendingCenterModalOpen(false)}
+                                className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                              >
+                                Cancelar
+                              </button>
+                              <button 
+                                onClick={() => handleUpdateStatus('PENDING_CENTER_ACTION')}
+                                disabled={!pendingCenterCategory || !pendingCenterMessage}
+                                className="px-8 py-2.5 rounded-xl font-black text-sm text-white bg-rose-600 hover:bg-rose-500 transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] disabled:opacity-30 disabled:cursor-not-allowed group flex items-center gap-2"
+                              >
+                                <AlertCircle size={16} className="group-hover:rotate-12 transition-transform" /> ENVIAR SOLICITUD
+                              </button>
+                           </div>
+                        </motion.div>
+                     </motion.div>
+                  )}
+              </AnimatePresence>
+
+              {/* Modal de Vista Previa PDF (A4 Simulator) */}
+              <AnimatePresence>
+                {showPreview && (
+                  <motion.div 
+                    initial={{ opacity: 0 }} 
+                    animate={{ opacity: 1 }} 
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md overflow-y-auto"
+                  >
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0, y: 30 }}
+                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                      exit={{ scale: 0.9, opacity: 0, y: 30 }}
+                      className="relative w-full max-w-4xl flex flex-col gap-6"
+                    >
+                      {/* Control Bar */}
+                      <div className="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/10 shrink-0">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                            <Printer size={20} />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-white font-black uppercase text-xs tracking-widest">Vista Previa de Informe</span>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Simulación de Impresión A4</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           <button className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-black tracking-widest text-slate-400 transition-all flex items-center gap-2">
+                             <Save size={14} /> GUARDAR PDF
+                           </button>
+                           <button 
+                             onClick={() => setShowPreview(false)}
+                             className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg text-[10px] font-black tracking-widest text-rose-500 transition-all flex items-center gap-2"
+                           >
+                             <X size={14} /> CERRAR
+                           </button>
+                        </div>
+                      </div>
+
+                      {/* Paper Container */}
+                      <div 
+                        className="bg-white mx-auto shadow-[0_30px_100px_rgba(0,0,0,0.5)] overflow-y-auto custom-scrollbar-paper"
+                        style={{ 
+                          width: '100%', 
+                          maxWidth: '210mm', 
+                          aspectRatio: '1 / 1.414',
+                          minHeight: '297mm',
+                          color: '#1a1a1a',
+                          fontFamily: 'Inter, sans-serif'
+                        }}
+                      >
+                         <div className="p-[20mm] flex flex-col h-full">
+                            {/* PDF HEADER */}
+                            <div className="flex justify-between items-start border-b-2 border-slate-900 pb-6 mb-8">
+                               <div className="flex flex-col">
+                                  <div className="flex items-center gap-2 mb-4">
+                                     <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center text-white font-black text-xl">P</div>
+                                     <div className="flex flex-col">
+                                        <span className="text-lg font-black tracking-tighter leading-none italic uppercase">HOLDING PORTEZUELO</span>
+                                        <span className="text-[9px] font-bold text-slate-500 tracking-[0.1em] uppercase">Red de Centros Radiológicos</span>
+                                     </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                     <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase font-black tracking-widest">
+                                        <ClipboardList size={10} /> {study.modality} - {study.enrichedInstitutionName}
+                                     </div>
+                                     <div className="text-xl font-black tracking-tight text-slate-900">
+                                        {study.studyDescription || 'ESTUDIO RADIOLÓGICO'}
+                                     </div>
+                                  </div>
+                               </div>
+
+                               <div className="bg-slate-50 p-4 border border-slate-100 rounded-xl space-y-2 min-w-[200px]">
+                                  <div className="flex flex-col">
+                                     <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Paciente</span>
+                                     <span className="text-xs font-bold text-slate-900">{study.patientFullName}</span>
+                                  </div>
+                                  <div className="flex gap-4">
+                                     <div className="flex flex-col">
+                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">RUT</span>
+                                        <span className="text-[10px] font-mono font-bold text-slate-800">{study.patientId}</span>
+                                     </div>
+                                     <div className="flex flex-col">
+                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Edad</span>
+                                        <span className="text-[10px] font-bold text-slate-800">{study.age || '--'}</span>
+                                     </div>
+                                  </div>
+                                  <div className="flex flex-col pt-1">
+                                     <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Fecha</span>
+                                     <span className="text-[10px] font-bold text-slate-800">{new Date(study.studyDate).toLocaleDateString('es-CL')}</span>
+                                  </div>
+                               </div>
+                            </div>
+
+                            {/* PDF BODY */}
+                            <div className="flex-1 space-y-8 text-sm leading-relaxed">
+                               {sections.technique && (
+                                  <div>
+                                     <h3 className="font-black text-xs uppercase tracking-[0.2em] mb-2 text-slate-400 border-l-4 border-slate-200 pl-3">Técnica</h3>
+                                     <p className="whitespace-pre-wrap pl-4">{sections.technique}</p>
+                                  </div>
+                                )}
+                                {sections.history && (
+                                  <div>
+                                     <h3 className="font-black text-xs uppercase tracking-[0.2em] mb-2 text-slate-400 border-l-4 border-slate-200 pl-3">Antecedentes</h3>
+                                     <p className="whitespace-pre-wrap pl-4">{sections.history}</p>
+                                  </div>
+                                )}
+                                {sections.findings && (
+                                  <div>
+                                     <h3 className="font-black text-xs uppercase tracking-[0.2em] mb-2 text-slate-400 border-l-4 border-slate-200 pl-3">Hallazgos</h3>
+                                     <p className="whitespace-pre-wrap pl-4 font-medium">{sections.findings}</p>
+                                  </div>
+                                )}
+                                {sections.impression && (
+                                  <div className="pt-4 border-t border-slate-100">
+                                     <h3 className="font-black text-xs uppercase tracking-[0.2em] mb-2 text-slate-900 flex items-center gap-2">
+                                        <CheckCircle2 size={14} className="text-emerald-600" /> Conclusión
+                                     </h3>
+                                     <p className="whitespace-pre-wrap pl-6 font-bold">{sections.impression}</p>
+                                  </div>
+                                )}
+                            </div>
+
+                            {/* PDF FOOTER (Signatures) */}
+                            <div className="mt-12 pt-8 border-t-2 border-slate-900 flex justify-end">
+                               <div className="flex flex-col items-center text-center">
+                                  {canSign ? (
+                                    <>
+                                       <div className="w-48 h-20 mb-2 flex items-center justify-center">
+                                          {/* Mock Signature Graphics */}
+                                          <div className="font-serif italic text-3xl opacity-30 select-none">
+                                            {currentMedicName.split(' ').map(n => n[0]).join('')}
+                                          </div>
+                                       </div>
+                                       <div className="w-56 h-px bg-slate-900 mb-2" />
+                                       <span className="text-[11px] font-black uppercase tracking-widest">{currentMedicName}</span>
+                                       <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Radiólogo Responsable</span>
+                                    </>
+                                  ) : (
+                                    <div className="flex flex-col items-center py-4 border-2 border-dashed border-slate-200 px-8 rounded-2xl bg-slate-50">
+                                       <AlertCircle size={20} className="text-amber-500 mb-2" />
+                                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">PENDIENTE DE VALIDACIÓN</span>
+                                       <span className="text-[9px] text-slate-400">Por Jefatura Médica</span>
+                                    </div>
+                                  )}
+                               </div>
+                            </div>
+                         </div>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Plantillas Overlay */}
+
               <AnimatePresence>
                 {showTemplates && (
                   <motion.div 

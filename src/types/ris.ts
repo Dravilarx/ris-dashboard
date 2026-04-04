@@ -19,6 +19,22 @@
  */
 
 // ═══════════════════════════════════════════════════════════
+// Identidad Adaptativa (Hospital del Cobre / Multi-Centro)
+// ═══════════════════════════════════════════════════════════
+
+/** Fuente de identificación del paciente según el centro B2B */
+export type PatientIdSource = 'RUT' | 'NUM_COBRE' | 'EXTERNAL_ID';
+
+/** Configuración de identidad de un centro B2B */
+export interface B2BCenterIdentityConfig {
+  centerId: string;
+  centerName: string;
+  patientIdSource: PatientIdSource;
+  /** Label humano para el tipo de ID (ej: 'RUT', 'N° Cobre', 'ID Externo') */
+  idLabel: string;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Entidades de Dominio
 // ═══════════════════════════════════════════════════════════
 
@@ -55,6 +71,8 @@ export interface Study {
   validatorUsername: string;
   technologist: string;
   requestingPhysician: string;
+  /** ID externo del paciente (Número Cobre, código de empleado, etc.) */
+  externalPatientId?: string;
 }
 
 /** Estudio radiológico enriquecido con datos de AMIS 3.0 */
@@ -64,6 +82,20 @@ export interface EnrichedStudy extends Study {
   expectedSLACriticalMinutes: number;
   expectedSLAUrgentMinutes: number;
   expectedSLANormalMinutes: number;
+  // B2B / Pending Actions metadata
+  pendingReason?: string;
+  pendingMessage?: string;
+  pendingStatus?: 'PENDING_CENTER_ACTION' | 'RESOLVED' | 'NONE';
+  isHighPriorityReturn?: boolean;
+  // ─── IDENTIDAD ADAPTATIVA ─────────────────────────────────
+  /** Qué tipo de ID se usa para este paciente según su centro de origen */
+  patientIdSource: PatientIdSource;
+  /** Label humanizado del tipo de ID (ej: 'RUT', 'N° Cobre') */
+  patientIdLabel: string;
+  /** El valor del ID efectivo para búsquedas (puede ser RUT o externalPatientId) */
+  effectivePatientId: string;
+  /** Configuración completa del centro B2B (si aplica) */
+  centerIdentityConfig?: B2BCenterIdentityConfig;
 }
 
 /** Informe radiológico */
@@ -165,10 +197,14 @@ export type DiagnosisMode = 'dark' | 'high-contrast' | 'low-light';
 
 /** Parámetros de búsqueda typeahead */
 export interface SearchParams {
-  /** Término de búsqueda (RUT, nombre, accession number) */
+  /** Término de búsqueda (RUT, nombre, accession number, N° Cobre, etc.) */
   query: string;
   /** Máximo de resultados */
   limit?: number;
+  /** Forzar búsqueda por un tipo de ID específico (Identidad Adaptativa) */
+  forceIdSource?: PatientIdSource;
+  /** ID de institución para determinar el tipo de búsqueda automáticamente */
+  institutionId?: number;
 }
 
 /** Resultado de búsqueda condensado para typeahead */

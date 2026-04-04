@@ -63,6 +63,7 @@ function mapRowToStudy(row: Record<string, unknown>): Study {
     validatorUsername: String(row.UsuarioValidador ?? ""),
     technologist: String(row.tecnologo ?? ""),
     requestingPhysician: String(row.medicosolicitante ?? ""),
+    externalPatientId: row.external_patient_id ? String(row.external_patient_id) : undefined,
   };
 }
 
@@ -226,21 +227,39 @@ export async function getReportContent(
 }
 
 /**
- * searchStudies — Búsqueda tipo typeahead por RUT, nombre o accession number
+ * searchStudies — Búsqueda tipo typeahead con soporte de Identidad Adaptativa
  *
  * Estrategia de detección automática:
  * - RUT (dígitos + guión): busca por idpaciente
  * - Numérico puro (5+ dígitos): busca por numeroacceso
  * - Texto: busca por nombre del paciente
+ *
+ * Si forceIdSource == 'NUM_COBRE' o 'EXTERNAL_ID':
+ * - Busca por external_patient_id en la tabla de producción
  */
 export async function searchStudies(
-  params: { query: string; limit?: number }
+  params: { query: string; limit?: number; forceIdSource?: string; institutionId?: number }
 ): Promise<SearchResult[]> {
-  const { query, limit = 15 } = params;
+  const { query, limit = 15, forceIdSource } = params;
   const cleanQuery = query.trim();
 
   if (cleanQuery.length < 2) return [];
 
+  // ─── IDENTIDAD ADAPTATIVA: búsqueda forzada por ID externo ───
+  if (forceIdSource === 'NUM_COBRE' || forceIdSource === 'EXTERNAL_ID') {
+    const searchLike = `${cleanQuery}%`;
+    const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+      SELECT TOP ${limit}
+        id_ris_examen, idpaciente, nombreFull, numeroacceso,
+        modalidad, fechaexamen, institucion, nombre_estado_examen
+      FROM View_Busqueda_Examen
+      WHERE idpaciente LIKE ${searchLike}
+      ORDER BY fechaexamen DESC
+    `;
+    return rows.map(mapRowToSearchResult);
+  }
+
+  // ─── DETECCIÓN AUTOMÁTICA (comportamiento estándar) ───
   const isRUT = /^\d+[-]?\d?$/i.test(cleanQuery.replace(/\./g, ""));
   const isAccession = /^\d{5,}$/.test(cleanQuery);
 

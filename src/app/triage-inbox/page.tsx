@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type TriageStatus = 'PENDING' | 'TECHNICAL' | 'ASSIGNED';
+type TriageStatus = 'TRIAGE_PENDING' | 'TECHNICAL' | 'ASSIGNED_TO_MEDIC';
 interface TriageItem {
   id: string;
   study_uid: string;
@@ -25,9 +25,9 @@ interface TriageItem {
 }
 
 const STATUS_CONFIG = {
-  PENDING:   { label: 'Pendiente Asignación', color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/30' },
-  TECHNICAL: { label: 'Resolución Técnica',   color: 'text-cyan-400',   bg: 'bg-cyan-500/10',   border: 'border-cyan-500/30' },
-  ASSIGNED:  { label: 'Asignado a Médico',    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
+  TRIAGE_PENDING:     { label: 'Pendiente Triage', color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/30' },
+  TECHNICAL:          { label: 'Resolución Técnica',   color: 'text-cyan-400',   bg: 'bg-cyan-500/10',   border: 'border-cyan-500/30' },
+  ASSIGNED_TO_MEDIC:  { label: 'Asignado a Médico',    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ export default function TriageInboxPage() {
   const [items, setItems]         = useState<TriageItem[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
-  const [filter, setFilter]       = useState<'ALL' | TriageStatus>('PENDING');
+  const [filter, setFilter]       = useState<'ALL' | TriageStatus>('TRIAGE_PENDING');
   const [actionItem, setActionItem] = useState<TriageItem | null>(null);
   const [actionType, setActionType] = useState<'technical' | 'assign' | null>(null);
   const [assignTarget, setAssignTarget] = useState('');
@@ -91,7 +91,7 @@ export default function TriageInboxPage() {
     setSaving(true);
     await supabase
       .from('addendum_requests')
-      .update({ status: 'ASSIGNED', requester_name: assignTarget.trim() })
+      .update({ status: 'ASSIGNED_TO_MEDIC', requester_name: assignTarget.trim() })
       .eq('id', actionItem.id);
     setSaving(false);
     setActionItem(null);
@@ -108,7 +108,7 @@ export default function TriageInboxPage() {
     return matchFilter && matchSearch;
   });
 
-  const pendingCount = items.filter(i => i.status === 'PENDING').length;
+  const pendingCount = items.filter(i => i.status === 'TRIAGE_PENDING').length;
 
   return (
     <div className="flex h-screen bg-[#020408] text-slate-200 overflow-hidden font-sans">
@@ -159,7 +159,7 @@ export default function TriageInboxPage() {
             />
           </div>
           <div className="flex gap-1">
-            {(['ALL', 'PENDING', 'TECHNICAL', 'ASSIGNED'] as const).map(f => (
+            {(['ALL', 'TRIAGE_PENDING', 'TECHNICAL', 'ASSIGNED_TO_MEDIC'] as const).map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -190,7 +190,7 @@ export default function TriageInboxPage() {
             <div className="space-y-3">
               <AnimatePresence>
                 {filtered.map(item => {
-                  const cfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.PENDING;
+                  const cfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.TRIAGE_PENDING;
                   return (
                     <motion.div
                       key={item.id}
@@ -231,8 +231,8 @@ export default function TriageInboxPage() {
                           </div>
                         </div>
 
-                        {/* Action buttons — only visible for PENDING items */}
-                        {item.status === 'PENDING' && (
+                        {/* Action buttons — only visible for TRIAGE_PENDING items */}
+                        {item.status === 'TRIAGE_PENDING' && (
                           <div className="flex flex-col gap-2 shrink-0">
                             <button
                               onClick={() => { setActionItem(item); setActionType('technical'); }}
@@ -249,7 +249,7 @@ export default function TriageInboxPage() {
                           </div>
                         )}
 
-                        {item.status !== 'PENDING' && (
+                        {item.status !== 'TRIAGE_PENDING' && (
                           <div className="shrink-0">
                             <CheckCircle2 size={20} className={cfg.color} />
                           </div>

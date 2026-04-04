@@ -22,7 +22,12 @@ import {
   Layers,
   ArrowRight,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  RefreshCcw,
+  Stethoscope,
+  FolderOpen,
+  Shield,
+  BarChart2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -206,16 +211,34 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   // Maps studyInstanceUID → addendum request_text for pending requests
   const [pendingAddendums, setPendingAddendums] = useState<Record<string, string>>({});
 
+  // Mock current user for demo (In prod: get from auth context)
+  const currentMedicName = 'DR. MARCELO AVILA';
+
   const fetchPendingAddendums = useCallback(async () => {
+    // Inicia una suscripción de Supabase a la tabla addendum_requests filtrando por médicos asignados o pendientes de triage
     const { data: rows, error } = await supabase
       .from('addendum_requests')
-      .select('study_uid, request_text')
-      .eq('status', 'PENDING');
+      .select('study_uid, request_text, requester_name, status')
+      .in('status', ['TRIAGE_PENDING', 'ASSIGNED_TO_MEDIC']);
+
     if (error) { console.error('[Addendum Scanner]', error); return; }
+
     const map: Record<string, string> = {};
-    rows?.forEach(r => { map[r.study_uid] = r.request_text; });
+    rows?.forEach(r => {
+      // Alerta UI para el Radiólogo:
+      // Si el status es ASSIGNED_TO_MEDIC y coincide con el ID del radiólogo logueado
+      const isForMe = r.status === 'ASSIGNED_TO_MEDIC' &&
+                      r.requester_name?.toUpperCase() === currentMedicName.toUpperCase();
+
+      // O si soy secretaria y está pendiente de triage
+      const isForSecretary = r.status === 'TRIAGE_PENDING' && currentRole === 'ADMIN_SECRETARY';
+
+      if (isForMe || isForSecretary) {
+        map[r.study_uid] = r.request_text;
+      }
+    });
     setPendingAddendums(map);
-  }, []);
+  }, [currentRole]);
 
   useEffect(() => {
     fetchPendingAddendums();
@@ -250,19 +273,59 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
     router.push(`/informe/${study.studyInstanceUID}`);
   };
 
-  const columns = useMemo(() => [
+  // ─── PRIORIDAD DE RETORNO: estudios resueltos por el centro saltan al tope ───
+  const sortedData = useMemo(() => {
+    if (!data) return [];
+    const returnStudies = data.filter(s => s.isHighPriorityReturn);
+    const rest = data.filter(s => !s.isHighPriorityReturn);
+    return [...returnStudies, ...rest];
+  }, [data]);
+
+  // ─── MAPA DE HISTORIAL PREVIO: detecta pacientes con estudios anteriores ─
+  const patientsWithHistory = useMemo(() => {
+    const seen = new Set<string>();
+    const withHistory = new Set<string>();
+    (data || []).forEach(s => {
+      const pid = s.effectivePatientId || s.patientId;
+      if (seen.has(pid)) { withHistory.add(pid); }
+      seen.add(pid);
+    });
+    return withHistory;
+  }, [data]);
+
+    const columns = useMemo(() => [
     columnHelper.accessor('patientFullName', {
       id: 'patientFullName',
       header: 'PACIENTE / IDENTIDAD',
-      cell: info => (
-        <div className="flex flex-col">
-          <span className="text-sm font-black tracking-tight uppercase leading-tight text-white/90">{String(info.getValue())}</span>
-          <div className="flex items-center gap-2 mt-0.5">
-             <span className="text-[10px] font-mono text-text-muted bg-white/5 px-1 rounded">{info.row.original.patientId}</span>
-             <span className="text-[10px] text-text-muted font-bold opacity-40 italic">{info.row.original.age} • {info.row.original.sex}</span>
+      cell: info => {
+        const study = info.row.original;
+        const effectiveId = study.effectivePatientId || study.patientId;
+        const idLabel = study.patientIdLabel || 'RUT';
+        const hasHistory = patientsWithHistory.has(effectiveId);
+        const idSource = study.patientIdSource;
+        return (
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-black tracking-tight uppercase leading-tight text-white/90">{String(info.getValue())}</span>
+              {hasHistory && (
+                <span title="Paciente con estudios previos" className="text-cyan-400/70 hover:text-cyan-300 transition-colors shrink-0">
+                  <FolderOpen size={13} />
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+               <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                 idSource === 'NUM_COBRE' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
+                 idSource === 'EXTERNAL_ID' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
+                 'bg-white/5 border-white/5 text-text-muted'
+               }`}>
+                 {idLabel}: {effectiveId}
+               </span>
+               <span className="text-[10px] text-text-muted font-bold opacity-40 italic">{study.age} • {study.sex}</span>
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     }),
     columnHelper.accessor('enrichedInstitutionName', {
       id: 'institutionName',
@@ -364,7 +427,7 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   );
 
   const table = useReactTable({
-    data: data || [],
+    data: sortedData,
     columns,
     state: { sorting, globalFilter, columnOrder },
     onSortingChange: setSorting,
@@ -438,6 +501,18 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
                 {pendingCosign.length}
               </span>
             )}
+          </button>
+        )}
+        {currentRole === 'MED_CHIEF' && (
+          <button
+            onClick={() => setActiveTab('torre-control' as any)}
+            className={`relative px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 ${
+              activeTab === ('torre-control' as any)
+                ? 'text-violet-400 border-violet-400'
+                : 'text-slate-500 border-transparent hover:text-violet-300'
+            }`}
+          >
+            <Shield size={12} /> Torre de Control
           </button>
         )}
         {/* DEV role switcher — replace with auth session in prod */}
@@ -515,6 +590,87 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
           </motion.div>
         )}
 
+        {/* ══════ TORRE DE CONTROL — MED_CHIEF EXCLUSIVE ══════ */}
+        {activeTab === ('torre-control' as any) && currentRole === 'MED_CHIEF' && (
+          <motion.div
+            key="torre-control-panel"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex-1 overflow-auto p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
+                <Shield size={16} className="text-violet-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white tracking-tight">Torre de Control — Jefatura</h3>
+                <p className="text-[10px] text-slate-500">Visibilidad total: trazabilidad de reasignaciones, auditoría de estados y supervisión clínica.</p>
+              </div>
+            </div>
+
+            {/* Tabla de trazabilidad */}
+            <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+              <div className="px-4 py-2 border-b border-violet-500/20 flex items-center gap-2">
+                <BarChart2 size={12} className="text-violet-400" />
+                <span className="text-[9px] font-black uppercase tracking-widest text-violet-400">Trazabilidad de Reasignaciones (últimas 24h)</span>
+              </div>
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-white/5">
+                    {['Paciente', 'Examen', 'Reasignado por', 'Receptor', 'Hora', 'Estado'].map(h => (
+                      <th key={h} className="px-4 py-2 text-[8px] font-black uppercase tracking-widest text-slate-600">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { patient: 'DÍAZ MONTOYA, R.', exam: 'TAC CEREBRO', from: 'Dr. Avila', to: 'Dr. Matta', time: '09:14', status: 'INFORMADO' },
+                    { patient: 'CAMPOS VERA, L.', exam: 'RM COLUMNA LS', from: 'Sec. Rojas', to: 'Dr. Avila', time: '10:32', status: 'EN PROCESO' },
+                    { patient: 'TORRES, M.A.', exam: 'RX TÓRAX PA', from: 'Sistema', to: 'Dr. Matta', time: '11:05', status: 'PENDIENTE' },
+                  ].map((row, i) => (
+                    <tr key={i} className="border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors">
+                      <td className="px-4 py-2.5 text-[11px] font-bold text-white/80 uppercase">{row.patient}</td>
+                      <td className="px-4 py-2.5 text-[10px] text-slate-400">{row.exam}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="text-[9px] font-black text-amber-400">{row.from}</span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="text-[9px] font-black text-cyan-400">{row.to}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-[10px] font-mono text-slate-500">{row.time}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={cn(
+                          "text-[8px] font-black uppercase px-2 py-0.5 rounded-full border",
+                          row.status === 'INFORMADO' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                          row.status === 'EN PROCESO' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                          'bg-slate-500/10 border-slate-500/20 text-slate-400'
+                        )}>
+                          {row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Resumen ejecutivo */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Informados hoy', value: '23', color: 'emerald', icon: '✅' },
+                { label: 'En proceso', value: '7', color: 'blue', icon: '🔵' },
+                { label: 'Pendientes B2B', value: '2', color: 'amber', icon: '⚠️' },
+              ].map(stat => (
+                <div key={stat.label} className={`p-4 rounded-2xl bg-${stat.color}-500/5 border border-${stat.color}-500/20`}>
+                  <div className="text-2xl font-black text-white">{stat.icon} {stat.value}</div>
+                  <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {activeTab === 'worklist' && (
           <motion.div
             key="worklist-table"
@@ -562,22 +718,40 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
                     "group transition-all duration-300 cursor-pointer border-l-4",
                     selectedId === row.original.id 
                       ? "bg-cyan-900/10 border-cyan-400 outline outline-1 outline-cyan-500/30 shadow-[inset_0_0_20px_rgba(6,182,212,0.05)]" 
-                      : hasPendingAddendum
-                        ? "bg-rose-950/30 border-rose-500 hover:bg-rose-950/50 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]"
-                        : "hover:bg-white/[0.04] border-transparent outline-transparent"
+                      : row.original.isHighPriorityReturn
+                        ? "bg-amber-950/40 border-amber-400 shadow-[inset_0_0_30px_rgba(245,158,11,0.08)] animate-[pulse_4s_ease-in-out_infinite]"
+                        : hasPendingAddendum
+                          ? "bg-rose-950/30 border-rose-500 hover:bg-rose-950/50 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]"
+                          : "hover:bg-white/[0.04] border-transparent outline-transparent"
                   )}
                 >
                   {row.getVisibleCells().map(cell => (
-                    <td key={cell.id} className="px-6 py-4 border-b border-white/[0.03] align-middle">
-                      {/* Inject addendum badge in the first cell */}
-                      {cell.column.id === 'patientFullName' && hasPendingAddendum ? (
+                    <td key={cell.id} className={cn(
+                      "px-6 py-4 border-b border-white/[0.03] align-middle",
+                      row.original.isHighPriorityReturn && "bg-amber-400/5"
+                    )}>
+                      {/* Inject addendum/priority badge in the patient column */}
+                      {cell.column.id === 'patientFullName' && (hasPendingAddendum || row.original.isHighPriorityReturn) ? (
                         <div className="flex flex-col gap-1.5">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 text-[9px] font-black uppercase tracking-widest animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.3)]">
-                              <AlertTriangle size={9} className="shrink-0" />
-                              ⚠️ ADDENDUM SOLICITADO
-                            </span>
+                          <div className={cn(
+                            "group-hover:translate-x-1 transition-transform duration-300",
+                            row.original.isHighPriorityReturn && "font-black"
+                          )}>
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {hasPendingAddendum && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 text-[9px] font-black uppercase tracking-widest animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.3)]">
+                                <AlertTriangle size={9} className="shrink-0" />
+                                ⚠️ ADDENDUM Requerido
+                              </span>
+                            )}
+                            {row.original.isHighPriorityReturn && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[9px] font-black uppercase tracking-widest animate-[pulse_2s_infinite] shadow-[0_0_8px_rgba(245,158,11,0.3)]">
+                                <RefreshCcw size={9} className="shrink-0" />
+                                RETORNADO / ALTA PRIORIDAD
+                              </span>
+                            )}
                           </div>
                         </div>
                       ) : (

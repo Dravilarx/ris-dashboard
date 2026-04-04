@@ -1,6 +1,6 @@
 import { getWorklist } from "@/lib/db/queries";
 import { supabase } from "@/lib/supabase";
-import type { PaginatedResult, EnrichedStudy } from "@/types/ris";
+import type { PaginatedResult, EnrichedStudy, PatientIdSource, B2BCenterIdentityConfig } from "@/types/ris";
 
 /**
  * Cache En Memoria de los mapeos de AMIS 3.0
@@ -9,6 +9,8 @@ let mappingCache: {
   doctors: Record<number, string>;
   institutions: Record<number, { id: string, name: string }>;
   slas: Record<string, Record<string, Record<string, number>>>; // [institutionUuid][category][modality] = minutes
+  /** Identidad Adaptativa: configuración por legacy_institution_id */
+  centerIdentities: Record<number, B2BCenterIdentityConfig>;
   lastFetch: number;
 } | null = null;
 
@@ -45,9 +47,10 @@ async function fetchMappingsFromAmis3() {
       supabase.from("ris_doctor_mapping").select("legacy_id, nombre_completo"),
       supabase.from("ris_institution_mapping").select("legacy_id, id, nombre_comercial"),
       supabase.from("ris_sla_rules").select("institution_id, category, modality, sla_minutes"),
+      supabase.from("b2b_centers").select("id, legacy_institution_id, center_name, patient_id_source, patient_id_label").eq("is_active", true),
     ]);
 
-    const [docsRes, instRes, slaRes] = await withTimeout(fetchPromises, SUPABASE_TIMEOUT_MS);
+    const [docsRes, instRes, slaRes, centersRes] = await withTimeout(fetchPromises, SUPABASE_TIMEOUT_MS);
 
     const doctors: Record<number, string> = {};
     if (docsRes?.data) {
@@ -68,13 +71,28 @@ async function fetchMappingsFromAmis3() {
       });
     }
 
-    mappingCache = { doctors, institutions, slas, lastFetch: now };
+    // ─── IDENTIDAD ADAPTATIVA: Centros B2B ───────────────────
+    const centerIdentities: Record<number, B2BCenterIdentityConfig> = {};
+    if (centersRes?.data) {
+      centersRes.data.forEach((c) => {
+        if (c.legacy_institution_id != null) {
+          centerIdentities[c.legacy_institution_id] = {
+            centerId: c.id,
+            centerName: c.center_name,
+            patientIdSource: c.patient_id_source as PatientIdSource,
+            idLabel: c.patient_id_label,
+          };
+        }
+      });
+    }
+
+    mappingCache = { doctors, institutions, slas, centerIdentities, lastFetch: now };
     return mappingCache;
 
   } catch (error) {
     console.warn("[Enrichment Service] Fallback Activado (VPN Only):", error instanceof Error ? error.message : "Error desconocido");
     // Return empty cache to trigger Fallbacks automatically
-    return { doctors: {}, institutions: {}, slas: {}, lastFetch: 0 };
+    return { doctors: {}, institutions: {}, slas: {}, centerIdentities: {}, lastFetch: 0 };
   }
 }
 
@@ -88,6 +106,51 @@ function normalizeCategory(urgencyString: string): string {
   if (u.includes("urg")) return "Urgencia";
   if (u.includes("hosp")) return "Hospitalizado";
   return "Ambulatorio";
+}
+
+/**
+ * Resuelve la Identidad Adaptativa para un estudio según la configuración
+ * del centro B2B de origen.
+ * 
+ * Lógica:
+ *   - Si el centro usa 'NUM_COBRE' → el ID efectivo es external_patient_id
+ *   - Si el centro usa 'EXTERNAL_ID' → el ID efectivo es external_patient_id
+ *   - Default ('RUT') → el ID efectivo es patientId (RUT estándar)
+ */
+function resolveAdaptiveIdentity(
+  study: { institutionId: number; patientId: string; externalPatientId?: string },
+  centerIdentities: Record<number, B2BCenterIdentityConfig>
+): { patientIdSource: PatientIdSource; patientIdLabel: string; effectivePatientId: string; centerIdentityConfig?: B2BCenterIdentityConfig } {
+  const centerConfig = centerIdentities[study.institutionId];
+  
+  if (!centerConfig) {
+    // Centro no configurado en B2B → default RUT
+    return {
+      patientIdSource: 'RUT',
+      patientIdLabel: 'RUT',
+      effectivePatientId: study.patientId,
+    };
+  }
+
+  const source = centerConfig.patientIdSource;
+  
+  if ((source === 'NUM_COBRE' || source === 'EXTERNAL_ID') && study.externalPatientId) {
+    return {
+      patientIdSource: source,
+      patientIdLabel: centerConfig.idLabel,
+      effectivePatientId: study.externalPatientId,
+      centerIdentityConfig: centerConfig,
+    };
+  }
+
+  // Fallback: si el centro dice NUM_COBRE pero no hay external_patient_id,
+  // usará el RUT con una indicación de que el ID preferido no está disponible
+  return {
+    patientIdSource: source,
+    patientIdLabel: centerConfig.idLabel,
+    effectivePatientId: study.externalPatientId || study.patientId,
+    centerIdentityConfig: centerConfig,
+  };
 }
 
 /**
@@ -145,6 +208,8 @@ export async function fetchEnrichedWorklist(
       expectedSLACriticalMinutes: criticalMins,
       expectedSLAUrgentMinutes: urgentMins,
       expectedSLANormalMinutes: normalMins,
+      // ─── IDENTIDAD ADAPTATIVA ────────────────────────────────
+      ...resolveAdaptiveIdentity(study, mappings.centerIdentities),
     };
   });
 
@@ -190,5 +255,7 @@ export async function getEnrichedStudyByUID(
     expectedSLACriticalMinutes: expectedMins,
     expectedSLAUrgentMinutes: Math.floor(expectedMins * 0.75),
     expectedSLANormalMinutes: expectedMins,
+    // ─── IDENTIDAD ADAPTATIVA ────────────────────────────────
+    ...resolveAdaptiveIdentity(study, mappings.centerIdentities),
   };
 }

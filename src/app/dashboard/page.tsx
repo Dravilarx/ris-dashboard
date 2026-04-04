@@ -3,6 +3,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import WorklistTable from '@/components/worklist/WorklistTable';
 import { fetchEnrichedWorklist } from '@/lib/services/enrichment-service';
 import { WorklistFilters } from '@/types/ris';
+import { ArrowRight } from 'lucide-react';
 
 export const metadata = {
   title: 'Bandeja de Diagnóstico | AMIS RIS 2030',
@@ -41,20 +42,29 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </p>
           </div>
           
-          <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl glass-panel border-white/10">
-             {['today', '24h', 'all'].map((range) => (
-                <a
-                  key={range}
-                  href={`/dashboard?timeRange=${range}`}
-                  className={`px-4 py-2 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all duration-300 ${
-                    timeRange === range 
-                      ? 'bg-accent text-background shadow-lg shadow-accent/20' 
-                      : 'text-text-muted hover:bg-white/5'
-                  }`}
-                >
-                  {range === 'today' ? 'Hoy' : range === '24h' ? '24h' : 'Todo'}
-                </a>
-             ))}
+          <div className="flex items-center gap-4">
+            <a 
+              href="/b2b"
+              className="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all flex items-center gap-2 group animate-glow-rose"
+            >
+              Portal B2B de Clientes <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+            </a>
+
+            <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl glass-panel border-white/10">
+               {['today', '24h', 'all'].map((range) => (
+                  <a
+                    key={range}
+                    href={`/dashboard?timeRange=${range}`}
+                    className={`px-4 py-2 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all duration-300 ${
+                      timeRange === range 
+                        ? 'bg-accent text-background shadow-lg shadow-accent/20' 
+                        : 'text-text-muted hover:bg-white/5'
+                    }`}
+                  >
+                    {range === 'today' ? 'Hoy' : range === '24h' ? '24h' : 'Todo'}
+                  </a>
+               ))}
+            </div>
           </div>
         </div>
 
