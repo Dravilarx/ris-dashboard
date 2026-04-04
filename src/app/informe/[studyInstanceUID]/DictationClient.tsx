@@ -7,8 +7,11 @@ import {
   ArrowLeft, Monitor, Save, Activity, FileText, CheckCircle2, 
   ChevronLeft, ChevronRight, FileDigit, ScanFace, Sparkles,
   Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Maximize, Clock, Stethoscope,
-  Plus, Edit2, Trash2, X, AlertTriangle, AlertCircle
+  Plus, Edit2, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Wifi, Loader2,
+  LayoutGrid, List, Columns, ExternalLink, Layout, Minimize2
 } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react'; 
+import { supabase } from '@/lib/supabase';
 
 export interface Template {
   id: string;
@@ -36,13 +39,72 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
     findings: useRef<HTMLTextAreaElement>(null),
     impression: useRef<HTMLTextAreaElement>(null),
   };
-  const [userRole, setUserRole] = useState<'Staff' | 'Residente'>('Residente');
+  // ─── AMIS ROLE SYSTEM ────────────────────────────────────────────────────
+  type AmisRole = 'MED_STAFF' | 'MED_CHIEF' | 'MED_RESIDENT' | 'MED_REQUIRES_COSIGN';
+  const [userRole, setUserRole] = useState<AmisRole>('MED_RESIDENT');
+  const canSign = userRole === 'MED_STAFF' || userRole === 'MED_CHIEF';
+  const isResident = userRole === 'MED_RESIDENT' || userRole === 'MED_REQUIRES_COSIGN';
+  // ─────────────────────────────────────────────────────────────────────────
   const [criticalAnswer, setCriticalAnswer] = useState<boolean | null>(null);
   const [criticalPathology, setCriticalPathology] = useState('');
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
   const [pendingReason, setPendingReason] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showSignModal, setShowSignModal] = useState(false);
+
+  // REMOTE DICTATION STATES
+  const [showRemoteQR, setShowRemoteQR] = useState(false);
+  const [remoteStatus, setRemoteStatus] = useState<'disconnected' | 'linked' | 'recording'>('disconnected');
+  const [remoteToken, setRemoteToken] = useState<string>('');
+  
+  // Generating remote token on mount
+  useEffect(() => {
+    setRemoteToken(Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15));
+  }, []);
+
+  // ─── ADDENDUM / INTERCONSULTA ALERT ──────────────────────────────────────
+  // Holds the active PENDING addendum request for this study, if any
+  type AddendumRequest = { id: string; request_text: string; requester_name: string | null };
+  const [addendumRequest, setAddendumRequest] = useState<AddendumRequest | null>(null);
+
+  useEffect(() => {
+    if (!study.studyInstanceUID) return;
+
+    // Initial fetch
+    supabase
+      .from('addendum_requests')
+      .select('id, request_text, requester_name')
+      .eq('study_uid', study.studyInstanceUID)
+      .eq('status', 'PENDING')
+      .maybeSingle()
+      .then(({ data }) => setAddendumRequest(data ?? null));
+
+    // Realtime subscription for this specific study
+    const ch = supabase
+      .channel(`addendum-editor-${study.studyInstanceUID}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'addendum_requests',
+          filter: `study_uid=eq.${study.studyInstanceUID}`
+        },
+        async () => {
+          const { data } = await supabase
+            .from('addendum_requests')
+            .select('id, request_text, requester_name')
+            .eq('study_uid', study.studyInstanceUID)
+            .eq('status', 'PENDING')
+            .maybeSingle();
+          setAddendumRequest(data ?? null);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [study.studyInstanceUID]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   // IA State
   const [isReviewingAI, setIsReviewingAI] = useState(false);
@@ -82,6 +144,31 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
     return () => clearInterval(saveInterval);
   }, [sections, study.studyInstanceUID]);
 
+  // ERGONOMICS & VIEW MODES
+  const [annexViewMode, setAnnexViewMode] = useState<'grid' | 'list'>('grid');
+  
+  // Advanced Viewer States
+  const [isViewerDocked, setIsViewerDocked] = useState(false);
+  const [viewerOpacity, setViewerOpacity] = useState(1);
+  const [isWindowPopout, setIsWindowPopout] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Persistence for user preferences
+  useEffect(() => {
+    const savedMode = localStorage.getItem('amis_annex_view_mode');
+    const savedCollapsed = localStorage.getItem('amis_sidebar_collapsed');
+    if (savedMode) setAnnexViewMode(savedMode as 'grid' | 'list');
+    if (savedCollapsed) setIsSidebarCollapsed(savedCollapsed === 'true');
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('amis_annex_view_mode', annexViewMode);
+  }, [annexViewMode]);
+
+  useEffect(() => {
+    localStorage.setItem('amis_sidebar_collapsed', isSidebarCollapsed.toString());
+  }, [isSidebarCollapsed]);
+
   // Reiniciar controles de vista lateral
   useEffect(() => {
     setZoomLevel(1);
@@ -114,6 +201,93 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       alert(error);
     }
   });
+
+  // REALTIME ANTENNA (SUPABASE)
+  useEffect(() => {
+    if (!study.studyInstanceUID) return;
+
+    console.log(`[Antenna] Listening for remote session on study: ${study.studyInstanceUID}`);
+    
+    // Subscribe to changes in the remote_dictation_sessions table
+    const channel = supabase
+      .channel(`remote-dictation-${study.studyInstanceUID}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'remote_dictation_sessions', 
+          filter: `study_uid=eq.${study.studyInstanceUID}` 
+        },
+        (payload: any) => {
+          const data = payload.new;
+          if (!data) return;
+
+          // Connection status
+          if (data.status === 'ACTIVE') setRemoteStatus('linked');
+          if (data.status === 'RECORDING') setRemoteStatus('recording');
+          if (data.status === 'DISCONNECTED') setRemoteStatus('disconnected');
+
+          // Text Injection Logic
+          if (data.live_text && data.live_text !== '') {
+            let processedText = data.live_text;
+
+            // Procesamiento de Comandos de Puntuación y Formato (Semántica Radiológica)
+            processedText = processedText.replace(/punto nueva línea/gi, '.\n');
+            processedText = processedText.replace(/punto nueva linea/gi, '.\n'); // Robustness for accents
+            processedText = processedText.replace(/punto y aparte/gi, '.\n\n');
+
+            const textToInject = " " + processedText.trim();
+            const currentRef = sectionRefs[activeSection]?.current;
+
+            if (currentRef) {
+              const start = currentRef.selectionStart;
+              const end = currentRef.selectionEnd;
+              
+              setSections(prev => {
+                const text = prev[activeSection];
+                const before = text.substring(0, start);
+                const after = text.substring(end);
+                return { ...prev, [activeSection]: before + textToInject + after };
+              });
+
+              // Mantener el foco y mover el cursor al final de la inserción
+              setTimeout(() => {
+                currentRef.focus();
+                const newPos = start + textToInject.length;
+                currentRef.setSelectionRange(newPos, newPos);
+              }, 50);
+            }
+          }
+
+          // Command Execution
+          if (data.last_command === 'NEXT_SECTION') {
+            const flow: Array<'technique' | 'history' | 'findings' | 'impression'> = ['technique', 'history', 'findings', 'impression'];
+            const currentIndex = flow.indexOf(activeSection);
+            const nextIndex = (currentIndex + 1) % flow.length;
+            setActiveSection(flow[nextIndex]);
+            sectionRefs[flow[nextIndex]].current?.focus();
+          }
+
+          if (data.last_command === 'PREVIOUS_SECTION') {
+            const flow: Array<'technique' | 'history' | 'findings' | 'impression'> = ['technique', 'history', 'findings', 'impression'];
+            const currentIndex = flow.indexOf(activeSection);
+            const nextIndex = currentIndex === 0 ? flow.length - 1 : currentIndex - 1;
+            setActiveSection(flow[nextIndex]);
+            sectionRefs[flow[nextIndex]].current?.focus();
+          }
+
+          if (data.last_command === 'OPEN_SIGN') {
+            setShowSignModal(true);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [study.studyInstanceUID, activeSection]);
 
 
   const safeTitle = study.studyDescription || 'Estudio sin Descripción';
@@ -286,13 +460,18 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const isAllFilled = sections.technique.trim() && sections.history.trim() && sections.findings.trim() && sections.impression.trim();
 
   const handleUpdateStatus = async (status: string, reason?: string) => {
+    // For residents sending to supervisor, override status to PENDING_VALIDATION
+    const effectiveStatus = isResident && status === 'VALIDATED' ? 'PENDING_VALIDATION' : status;
+
     const payload = {
       studyInstanceUID: study.studyInstanceUID,
-      status,
+      status: effectiveStatus,
       content: getFullText(),
       userRole,
       pendingReason: reason || null,
-      critical_alert: criticalAnswer === true ? { active: true, pathology: criticalPathology } : null
+      critical_alert: criticalAnswer === true ? { active: true, pathology: criticalPathology } : null,
+      // Resident metadata for supervision inbox
+      ...(isResident && { draft_author_role: userRole }),
     };
 
     try {
@@ -302,19 +481,31 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        if (status === 'VALIDATED') {
+        // AUTO-RESOLUTION: If signing (VALIDATED), mark any pending addendum as RESOLVED
+        if (effectiveStatus === 'VALIDATED' && addendumRequest?.id) {
+          await supabase
+            .from('addendum_requests')
+            .update({ status: 'RESOLVED', resolved_at: new Date().toISOString() })
+            .eq('id', addendumRequest.id);
+          console.log(`[Addendum] Auto-resolved addendum ${addendumRequest.id} upon sign.`);
+        }
+
+        if (effectiveStatus === 'VALIDATED') {
           window.location.href = '/dashboard';
-        } else if (status === 'PENDING_INFO') {
+        } else if (effectiveStatus === 'PENDING_VALIDATION') {
+          // Resident sent to supervisor — redirect to dashboard with confirmation
+          window.location.href = '/dashboard?sent_to_supervisor=1';
+        } else if (effectiveStatus === 'PENDING_INFO') {
           setIsPendingModalOpen(false);
           window.location.href = '/dashboard';
         } else {
-          alert("Borrador Guardado Exitosamente (Estado REPORTED)");
+          alert('Borrador Guardado Exitosamente (Estado REPORTED)');
         }
       } else {
-        alert("Error al actualizar estado.");
+        alert('Error al actualizar estado.');
       }
-    } catch (e) {
-      alert("Error de red.");
+    } catch {
+      alert('Error de red.');
     }
   };
 
@@ -379,94 +570,268 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                </div>
             </div>
 
-             
+            <div className="flex items-center gap-4 px-4 bg-white/5 rounded-xl border border-white/5 h-12">
+                <div className="flex items-center gap-2">
+                   <div className={`p-2 rounded-lg transition-all duration-500 ${
+                     remoteStatus === 'recording' ? 'bg-rose-500/20 text-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse' :
+                     remoteStatus === 'linked' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]' :
+                     'bg-white/5 text-slate-600'
+                   }`}>
+                     <Smartphone size={18} />
+                   </div>
+                   <div className="flex flex-col">
+                      <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${
+                        remoteStatus === 'recording' ? 'text-rose-400' :
+                        remoteStatus === 'linked' ? 'text-emerald-400' :
+                        'text-slate-600'
+                      }`}>Móvil</span>
+                      <span className="text-[10px] font-bold text-white/90">
+                        {remoteStatus === 'recording' ? 'DICTANDO...' : remoteStatus === 'linked' ? 'VINCULADO' : 'SYNC OFF'}
+                      </span>
+                   </div>
+                </div>
+            </div>
         </div>
       </header>
+
+      {/* ══════ ADDENDUM / INTERCONSULTA ALERT BANNER ══════ */}
+      <AnimatePresence>
+        {addendumRequest && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scaleY: 0.8 }}
+            animate={{ opacity: 1, y: 0, scaleY: 1 }}
+            exit={{ opacity: 0, y: -20, scaleY: 0.8 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            className="relative z-30 shrink-0 overflow-hidden"
+          >
+            {/* Animated left border sentinel */}
+            <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-rose-400 via-orange-400 to-rose-500 animate-pulse" />
+            <div className="bg-gradient-to-r from-rose-950/80 via-rose-900/60 to-[#020408]/80 border-b border-rose-500/40 backdrop-blur-xl px-8 py-3 flex items-center gap-5 shadow-[0_8px_32px_rgba(244,63,94,0.2)]">
+              {/* Pulsing alert icon */}
+              <div className="shrink-0 relative">
+                <div className="absolute inset-0 rounded-full bg-rose-500/30 animate-ping" />
+                <div className="relative w-9 h-9 rounded-full bg-rose-500/20 border border-rose-500/50 flex items-center justify-center">
+                  <AlertTriangle size={18} className="text-rose-400" />
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-[9px] font-black uppercase tracking-[0.25em] text-rose-400">⚠ INTERCONSULTA PENDIENTE</span>
+                  {addendumRequest.requester_name && (
+                    <span className="text-[9px] font-bold text-rose-300/60 uppercase tracking-widest">
+                      • {addendumRequest.requester_name}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-bold text-white leading-snug truncate" title={addendumRequest.request_text}>
+                  &ldquo;{addendumRequest.request_text}&rdquo;
+                </p>
+              </div>
+
+              {/* Right badge */}
+              <div className="shrink-0 flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[9px] font-black uppercase tracking-widest animate-pulse">
+                  RESPONDER EN INFORME
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Workspace Area */}
       <div className="flex-1 flex overflow-hidden">
         
         {/* Panel Izquierdo: Contexto Clínico (The Side-Cockpit) */}
-        <div className="w-[30%] bg-white/[0.01] border-r border-white/5 flex flex-col overflow-hidden relative backdrop-blur-3xl shadow-[inset_-20px_0_40px_rgba(0,0,0,0.2)]">
-           
-           {/* SLA Indicator */}
-           <div className="px-6 py-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-              <span className="text-[10px] font-black tracking-widest uppercase text-slate-400 flex items-center gap-2">
-                <Activity size={12} className="text-cyan-500" /> Tiempo Objetivo
-              </span>
-              <span className="text-xs font-mono font-bold text-slate-200 bg-black/50 px-2 py-0.5 rounded border border-white/10">
-                 SLA {study.expectedSLACriticalMinutes} min
-              </span>
-           </div>
+        <motion.div 
+          initial={false}
+          animate={{ width: isSidebarCollapsed ? '64px' : '30%' }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="bg-white/[0.01] border-r border-white/5 flex flex-col overflow-hidden relative backdrop-blur-3xl shadow-[inset_-20px_0_40px_rgba(0,0,0,0.2)] z-10"
+        >
+           {/* Botón de Colapso Flotante */}
+           <button 
+             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+             className="absolute top-4 right-4 z-50 p-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+           >
+             {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+           </button>
 
-           {/* Info Paciente Enriquecida */}
-           <div className="p-6 border-b border-white/5 shrink-0 flex flex-col gap-5">
-              <section>
-                <div className="grid grid-cols-2 gap-4">
-                   <div className="flex flex-col">
-                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Identificación</span>
-                     <span className="text-sm font-mono mt-0.5 text-slate-200">{study.patientId}</span>
-                   </div>
-                   <div className="flex flex-col">
-                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Edad / Sexo</span>
-                     <span className="text-sm font-mono mt-0.5 text-slate-200">{study.age} • {study.sex}</span>
-                   </div>
-                   <div className="col-span-2 flex flex-col">
-                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Examen Solicitado</span>
-                     <span className="text-sm font-medium mt-0.5 text-white/90">{safeTitle}</span>
-                   </div>
-                </div>
-              </section>
-
-              <section>
-                <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-500 mb-2 flex items-center gap-2">
-                  <FileText size={12} /> Historia Clínica
-                </h3>
-                <div className="p-3 bg-black/40 rounded-xl border border-white/5">
-                   <p className="text-sm text-slate-300 leading-relaxed font-medium">
-                     {study.clinicalHistory || 'Sin antecedentes proporcionados por la institución de origen. Favor referirse a las imágenes.'}
-                   </p>
-                </div>
-              </section>
-           </div>
-
-           {/* Carrusel de Anexos */}
-           <div className="p-6 flex-1 flex flex-col min-h-0 bg-gradient-to-b from-transparent to-[#020408]">
-             <div className="flex items-center justify-between mb-4">
-                <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-400 flex items-center gap-2">
-                  <FileDigit size={12} className="text-amber-500" /> Anexos Previos
-                </h3>
-                <span className="text-[10px] font-mono font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{annexes.length} / RIS</span>
-             </div>
-
-             <div className="relative flex-1 bg-black/50 rounded-xl border border-white/10 overflow-hidden">
-                 <div className="p-4 absolute inset-0 w-full flex flex-col gap-3 overflow-y-auto">
-                    {annexes.length > 0 ? annexes.map((file) => (
-                       <div 
-                         key={file.id}
-                         onClick={() => setActiveAttachment(file)}
-                         className="bg-white/5 border border-white/10 rounded-lg p-3 hover:bg-white/10 transition-colors cursor-pointer group/item"
-                       >
-                         <div className="flex items-center gap-3">
-                           <div className="w-10 h-10 bg-white/10 rounded flex items-center justify-center text-slate-300 group-hover/item:text-white transition-colors">
-                             <FileText size={18} />
-                           </div>
-                           <div className="flex flex-col flex-1 overflow-hidden">
-                              <span className="text-sm font-bold truncate text-slate-200">{file.name}</span>
-                              <span className="text-[10px] text-slate-500 mt-0.5 uppercase">{file.type} • {(file.sizeBytes || 0) / 1000000} MB</span>
-                           </div>
-                         </div>
-                       </div>
-                    )) : (
-                       <div className="flex flex-col items-center justify-center h-full text-center">
-                         <span className="text-xs font-bold text-slate-500">Documental Vacío</span>
-                         <span className="text-[10px] text-slate-600 mt-1">Este examen no tiene escaneos o historial asociado</span>
-                       </div>
-                    )}
+           <AnimatePresence mode="wait">
+             {!isSidebarCollapsed ? (
+               <motion.div 
+                 key="expanded-content"
+                 initial={{ opacity: 0 }}
+                 animate={{ opacity: 1 }}
+                 exit={{ opacity: 0 }}
+                 className="flex flex-col h-full overflow-hidden"
+               >
+                 {/* SLA Indicator */}
+                 <div className="px-6 py-3 bg-white/5 border-b border-white/5 flex items-center justify-between overflow-hidden">
+                    <span className="text-[10px] font-black tracking-widest uppercase text-slate-400 flex items-center gap-2 whitespace-nowrap">
+                      <Activity size={12} className="text-cyan-500" /> Tiempo Objetivo
+                    </span>
+                    <span className="text-xs font-mono font-bold text-slate-200 bg-black/50 px-2 py-0.5 rounded border border-white/10">
+                       SLA {study.expectedSLACriticalMinutes} min
+                    </span>
                  </div>
-             </div>
-           </div>
-        </div>
+
+                 {/* Info Paciente Enriquecida */}
+                 <div className="p-6 border-b border-white/5 shrink-0 flex flex-col gap-5">
+                    <section>
+                      <div className="grid grid-cols-2 gap-4">
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Identificación</span>
+                           <span className="text-sm font-mono mt-0.5 text-slate-200">{study.patientId}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Edad / Sexo</span>
+                           <span className="text-sm font-mono mt-0.5 text-slate-200">{study.age} • {study.sex}</span>
+                         </div>
+                         <div className="col-span-2 flex flex-col">
+                           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Examen Solicitado</span>
+                           <span className="text-sm font-medium mt-0.5 text-white/90">{safeTitle}</span>
+                         </div>
+                      </div>
+                    </section>
+
+                    <section>
+                      <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-500 mb-2 flex items-center gap-2">
+                        <FileText size={12} /> Historia Clínica
+                      </h3>
+                      <div className="p-3 bg-black/40 rounded-xl border border-white/5 max-h-[100px] overflow-y-auto">
+                         <p className="text-sm text-slate-300 leading-relaxed font-medium">
+                           {study.clinicalHistory || 'Sin antecedentes proporcionados por la institución de origen.'}
+                         </p>
+                      </div>
+                    </section>
+                 </div>
+
+                 {/* Carrusel de Anexos (Filmstrip Visual) */}
+                  <div className="p-6 flex-1 flex flex-col min-h-0 bg-gradient-to-b from-transparent to-[#020408]">
+                    <div className="flex items-center justify-between mb-4">
+                       <h3 className="text-[10px] font-black tracking-widest uppercase text-slate-400 flex items-center gap-2">
+                         <FileDigit size={12} className="text-amber-500" /> Historial de Anexos
+                       </h3>
+                       
+                       {/* Selector de Vista (Mode Toggle) */}
+                       <div className="flex items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/10">
+                          <button 
+                            onClick={() => setAnnexViewMode('grid')}
+                            className={`p-1.5 rounded-md transition-all ${annexViewMode === 'grid' ? 'bg-amber-500 text-black' : 'text-slate-500 hover:text-slate-300'}`}
+                            title="Vista Galería"
+                          >
+                            <LayoutGrid size={14} />
+                          </button>
+                          <button 
+                            onClick={() => setAnnexViewMode('list')}
+                            className={`p-1.5 rounded-md transition-all ${annexViewMode === 'list' ? 'bg-amber-500 text-black' : 'text-slate-500 hover:text-slate-300'}`}
+                            title="Vista Compacta"
+                          >
+                            <List size={14} />
+                          </button>
+                       </div>
+                    </div>
+
+                    <div className="relative flex-1 bg-black/40 rounded-[2rem] border border-white/5 overflow-hidden shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
+                        <div className={`p-5 absolute inset-0 w-full overflow-y-auto custom-scrollbar ${annexViewMode === 'grid' ? 'grid grid-cols-2 gap-4' : 'flex flex-col gap-2'}`}>
+                           {annexes.length > 0 ? [...annexes]
+                             .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
+                             .map((file) => {
+                              const isPDF = file.name.toLowerCase().endsWith('.pdf');
+                              const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(file.name);
+                              const fileDate = file.date ? new Date(file.date).toLocaleDateString('es-CL', { month: 'short', year: 'numeric' }) : 'S/F';
+
+                              if (annexViewMode === 'grid') {
+                                return (
+                                  <motion.div 
+                                    key={file.id}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    whileHover={{ y: -5, scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => setActiveAttachment(file)}
+                                    className="relative group cursor-pointer"
+                                  >
+                                    <div className="aspect-[3/4] bg-slate-900 rounded-2xl border border-white/10 overflow-hidden shadow-2xl transition-all group-hover:border-amber-500/50 group-hover:shadow-[0_10px_30px_rgba(245,158,11,0.15)] flex items-center justify-center">
+                                       {isImage ? (
+                                         <img 
+                                           src={file.url || '/placeholder-doc.png'} 
+                                           alt={file.name}
+                                           className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                                         />
+                                       ) : (
+                                         <div className="relative w-full h-full flex flex-col items-center justify-center bg-[#0a0f1d] p-4 text-center">
+                                            <FileText size={24} className={isPDF ? "text-rose-500" : "text-blue-500"} />
+                                            <span className="text-[8px] font-black uppercase text-slate-500 tracking-[0.2em] mt-2 block">{isPDF ? 'PDF Doc' : 'TXT File'}</span>
+                                         </div>
+                                       )}
+                                       <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black via-black/80 to-transparent pt-8">
+                                          <span className="block text-[9px] font-black text-white truncate">{file.name}</span>
+                                       </div>
+                                    </div>
+                                    <div className="mt-2 flex items-center justify-between px-1">
+                                       <span className="text-[8px] font-black uppercase tracking-widest text-amber-500/70">{fileDate}</span>
+                                    </div>
+                                  </motion.div>
+                                );
+                              } else {
+                                // Vista de LISTA Compacta
+                                return (
+                                  <motion.div
+                                    key={file.id}
+                                    layout
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    onClick={() => setActiveAttachment(file)}
+                                    className="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-amber-500/30 transition-all cursor-pointer group"
+                                  >
+                                    <div className="w-8 h-8 rounded-lg bg-black/40 flex items-center justify-center text-slate-500 group-hover:text-amber-500 transition-colors">
+                                      {isPDF ? <FileText size={14} /> : isImage ? <ScanFace size={14} /> : <FileDigit size={14} />}
+                                    </div>
+                                    <div className="flex flex-col flex-1 overflow-hidden">
+                                      <span className="text-[11px] font-bold text-slate-200 truncate">{file.name}</span>
+                                      <span className="text-[9px] text-slate-500 font-mono tracking-tighter uppercase">{fileDate} • {file.type}</span>
+                                    </div>
+                                    <ChevronRight size={12} className="text-slate-600 group-hover:text-amber-500 transform group-hover:translate-x-1 transition-all" />
+                                  </motion.div>
+                                );
+                              }
+                           }) : (
+                              <div className="flex flex-col items-center justify-center py-20 text-center opacity-40">
+                                <ScanFace size={32} className="text-slate-500" />
+                                <span className="text-xs font-black uppercase tracking-widest text-slate-400 mt-4">Sin Anexos</span>
+                              </div>
+                           )}
+                        </div>
+                    </div>
+                  </div>
+               </motion.div>
+             ) : (
+               <motion.div 
+                 key="collapsed-content"
+                 initial={{ opacity: 0 }}
+                 animate={{ opacity: 1 }}
+                 className="flex flex-col items-center py-20 gap-8"
+               >
+                 <div className="flex flex-col items-center gap-1 [writing-mode:vertical-lr] rotate-180 text-slate-500">
+                    <span className="text-[10px] font-black tracking-[0.3em] uppercase">Contexto Clínico</span>
+                 </div>
+                 <div className="flex flex-col gap-4">
+                    <button onClick={() => setIsSidebarCollapsed(false)} className="p-3 rounded-full bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all">
+                       <Activity size={20} />
+                    </button>
+                    <button onClick={() => setIsSidebarCollapsed(false)} className="p-3 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-all">
+                       <FileDigit size={20} />
+                    </button>
+                 </div>
+               </motion.div>
+             )}
+           </AnimatePresence>
+        </motion.div>
 
         {/* Panel Central: Editor de Texto 'Vocalis & Groq' (70%) */}
         <div className="flex-1 flex flex-col relative bg-[#020408]">
@@ -530,8 +895,71 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                   {isReviewingAI ? <RotateCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
                   Guardia IA
                 </button>
+
+                <button 
+                  onClick={() => setShowRemoteQR(!showRemoteQR)}
+                  className="flex items-center gap-2 text-xs font-black px-4 py-2 bg-gradient-to-br from-slate-800 to-slate-900 text-white hover:from-cyan-600 hover:to-blue-700 rounded-xl border border-white/10 transition-all shadow-xl active:scale-95 group"
+                >
+                  <span className="animate-bounce group-hover:animate-none">📱</span> Dictáfono Móvil
+                </button>
              </div>
            </div>
+
+           {/* QR OVERLAY */}
+           <AnimatePresence>
+             {showRemoteQR && (
+               <motion.div 
+                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                 animate={{ opacity: 1, scale: 1, y: 0 }}
+                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                 className="absolute inset-0 z-50 flex items-center justify-center p-8 bg-[#020408]/90 backdrop-blur-3xl"
+               >
+                  <div className="w-full max-w-sm bg-[#0a0f1d] border border-cyan-500/30 rounded-3xl p-8 flex flex-col items-center shadow-[0_0_80px_rgba(6,182,212,0.15)] relative overflow-hidden">
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent" />
+                    <button 
+                      onClick={() => setShowRemoteQR(false)}
+                      className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
+
+                    <div className="p-3 bg-cyan-500/10 rounded-2xl mb-4">
+                      <Smartphone size={32} className="text-cyan-400" />
+                    </div>
+                    
+                    <h2 className="text-xl font-black text-white tracking-tighter text-center mb-1">Móvil Vinculado</h2>
+                    <p className="text-[11px] font-medium text-slate-500 text-center uppercase tracking-widest mb-8">Dictado Remoto encriptado de extremo a extremo</p>
+
+                    <div className="p-6 bg-white rounded-3xl shadow-[0_0_40px_rgba(255,255,255,0.1)] relative">
+                      <QRCodeCanvas 
+                        value={`https://tu-amis-30.vercel.app/mobile-mic/${remoteToken}?study_uid=${study.studyInstanceUID}`} 
+                        size={180} 
+                        level="H" 
+                        includeMargin={false}
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                         <div className="w-10 h-10 bg-white border-4 border-white rounded-lg flex items-center justify-center">
+                            <Activity size={24} className="text-[#020408]" />
+                         </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-8 space-y-4 w-full">
+                       <div className="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                          <span className="text-[10px] font-bold text-slate-300">Escanea para conectar micrófono móvil</span>
+                       </div>
+                       <button 
+                         onClick={() => setShowRemoteQR(false)}
+                         className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all"
+                       >
+                         Continuar con Mic Local (F2)
+                       </button>
+                    </div>
+                  </div>
+               </motion.div>
+             )}
+           </AnimatePresence>
 
            {/* Editor Area */}
            <div className="flex-1 px-16 py-12 relative overflow-hidden flex justify-center">
@@ -768,14 +1196,32 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       INFORMAR
                     </button>
 
-                    <button 
-                      onClick={() => setShowSignModal(true)}
-                      disabled={userRole !== 'Staff' || !isAllFilled || criticalAnswer === null}
-                      className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-[#39FF14] hover:bg-[#32e612] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(57,255,20,0.3)] hover:shadow-[0_0_20px_rgba(57,255,20,0.5)] tracking-widest flex items-center gap-2"
-                      title={userRole !== 'Staff' ? "Solo Staff puede validar" : (criticalAnswer === null ? "Debe responder la Pausa Clínica" : "Validar y Firmar")}
-                    >
-                      <CheckCircle2 size={16} /> VALIDAR Y FIRMAR
-                    </button>
+                    {/* ── DYNAMIC ACTION BUTTONS based on AMIS Role ── */}
+                    {canSign ? (
+                      /* MED_STAFF / MED_CHIEF → Primary green sign button */
+                      <button 
+                        onClick={() => setShowSignModal(true)}
+                        disabled={!isAllFilled || criticalAnswer === null}
+                        className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-[#39FF14] hover:bg-[#32e612] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(57,255,20,0.3)] hover:shadow-[0_0_20px_rgba(57,255,20,0.5)] tracking-widest flex items-center gap-2"
+                        title={criticalAnswer === null ? 'Debe responder la Pausa Clínica' : 'Validar y Firmar como Responsable Legal'}
+                      >
+                        <CheckCircle2 size={16} /> VALIDAR Y FIRMAR
+                      </button>
+                    ) : (
+                      /* MED_RESIDENT / MED_REQUIRES_COSIGN → Send to supervisor (orange) */
+                      <button
+                        onClick={async () => {
+                          if (!isAllFilled) return;
+                          if (criticalAnswer === null) { alert('Debe responder la Pausa Clínica antes de enviar.'); return; }
+                          await handleUpdateStatus('PENDING_VALIDATION');
+                        }}
+                        disabled={!isAllFilled || criticalAnswer === null}
+                        className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-orange-500 hover:bg-orange-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(249,115,22,0.4)] hover:shadow-[0_0_22px_rgba(249,115,22,0.6)] tracking-widest flex items-center gap-2 active:scale-95"
+                        title={criticalAnswer === null ? 'Debe responder la Pausa Clínica' : 'Enviar borrador al supervisor para su firma y validación legal'}
+                      >
+                        <Stethoscope size={16} /> ENVIAR A MI SUPERVISOR
+                      </button>
+                    )}
                  </div>
               </div>
 
@@ -959,6 +1405,59 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Espacio para el Visor Anclado (Docked View - Side by Side) */}
+            <AnimatePresence>
+               {isViewerDocked && activeAttachment && (
+                 <motion.div
+                   initial={{ width: 0, opacity: 0 }}
+                   animate={{ width: '40%', opacity: 1 }}
+                   exit={{ width: 0, opacity: 0 }}
+                   transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+                   className="border-l border-white/10 bg-[#050810] flex flex-col overflow-hidden z-20 relative shadow-2xl"
+                 >
+                    <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between shrink-0">
+                       <div className="flex items-center gap-2 overflow-hidden">
+                          <FileText size={16} className="text-cyan-400 shrink-0" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-white truncate">{activeAttachment.name}</span>
+                       </div>
+                       <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => setIsViewerDocked(false)}
+                            className="p-1.5 hover:bg-white/10 rounded-md text-slate-400 hover:text-white transition-colors"
+                            title="Desanclar / Volver a Flotante"
+                          >
+                            <Minimize2 size={14} />
+                          </button>
+                          <button 
+                            onClick={() => setActiveAttachment(null)}
+                            className="p-1.5 hover:bg-rose-500/10 rounded-md text-slate-400 hover:text-rose-400 transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
+                       </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-hidden relative group bg-black/50">
+                       {activeAttachment.type === 'pdf' ? (
+                         <iframe 
+                           src={`${activeAttachment.url}#view=FitH`} 
+                           className="w-full h-full border-0"
+                           title={activeAttachment.name}
+                         />
+                       ) : (
+                         <div className="w-full h-full flex items-center justify-center p-4">
+                            <img 
+                              src={activeAttachment.url} 
+                              alt={activeAttachment.name}
+                              className="max-w-full max-h-full object-contain drop-shadow-2xl"
+                            />
+                         </div>
+                       )}
+                    </div>
+                 </motion.div>
+               )}
+            </AnimatePresence>
           </div>
 
       {/* Modal de Firma */}
@@ -1027,11 +1526,15 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                      >
                        Volver al Editor
                      </button>
-                     <Link href="/dashboard">
-                        <button className="px-8 py-2.5 rounded-xl font-black text-sm text-[#020408] bg-amber-500 hover:bg-amber-400 transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
-                          <CheckCircle2 size={16} /> Emitir Informe Firmado
-                        </button>
-                     </Link>
+                     <button 
+                       onClick={async () => {
+                         setShowSignModal(false);
+                         await handleUpdateStatus('VALIDATED');
+                       }}
+                       className="px-8 py-2.5 rounded-xl font-black text-sm text-[#020408] bg-amber-500 hover:bg-amber-400 transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.3)] active:scale-95"
+                     >
+                       <CheckCircle2 size={16} /> Firmar y Cerrar
+                     </button>
                   </div>
                </motion.div>
             </motion.div>
@@ -1039,98 +1542,128 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       </AnimatePresence>
 
       {/* Modal Visor Ligero de Anexos */}
-      <AnimatePresence>
-         {activeAttachment && (
+       <AnimatePresence>
+         {activeAttachment && !isViewerDocked && (
             <motion.div 
-               initial={{ opacity: 0 }} 
-               animate={{ opacity: 1 }} 
-               exit={{ opacity: 0 }}
-               className="fixed inset-0 z-[60] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md"
-               onClick={() => setActiveAttachment(null)}
+               drag
+               dragMomentum={false}
+               initial={{ opacity: 0, scale: 0.9, x: 100, y: 100 }} 
+               animate={{ opacity: viewerOpacity, scale: 1 }} 
+               exit={{ opacity: 0, scale: 0.9 }}
+               style={{ 
+                 width: 'max(400px, 50vw)', 
+                 height: 'max(300px, 70vh)',
+                 position: 'fixed',
+                 top: '10%',
+                 left: '25%',
+               }}
+               className="z-[60] bg-[#050810] border border-white/10 rounded-2xl overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,0.8)] flex flex-col cursor-auto"
+               onClick={(e) => e.stopPropagation()}
             >
-               <motion.div 
-                 initial={{ scale: 0.95, opacity: 0, y: 20 }}
-                 animate={{ scale: 1, opacity: 1, y: 0 }}
-                 exit={{ scale: 0.95, opacity: 0, y: 20 }}
-                 className="w-full max-w-5xl h-[85vh] bg-[#050810] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
-                 onClick={(e) => e.stopPropagation()}
-               >
-                  <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
-                     <div className="flex items-center gap-3">
-                        <FileText size={18} className="text-cyan-400" />
-                        <h2 className="text-sm font-bold text-white">{activeAttachment.name}</h2>
-                     </div>
-                     <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1 mr-4 border-r border-white/10 pr-4">
-                          <button onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.25))} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors" title="Zoom Out">
-                            <ZoomOut size={14} />
-                          </button>
-                          <span className="text-[10px] font-mono text-slate-400 w-8 text-center">{Math.round(zoomLevel * 100)}%</span>
-                          <button onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.25))} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors" title="Zoom In">
-                            <ZoomIn size={14} />
-                          </button>
-                          <button onClick={() => setRotation(prev => (prev + 90) % 360)} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors ml-2" title="Rotar 90º">
-                            <RotateCw size={14} />
-                          </button>
-                          <button onClick={() => document.getElementById('annex-viewer-container')?.requestFullscreen()} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors ml-1" title="Pantalla Completa">
-                            <Maximize size={14} />
-                          </button>
-                        </div>
-                        <a 
-                          href={`/api/annexes/${study.studyInstanceUID}/${activeAttachment.id}`}
-                          download={`${activeAttachment.name}.${activeAttachment.type === 'pdf' ? 'pdf' : 'jpg'}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-widest text-cyan-400 hover:text-cyan-300 transition-colors px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-md"
-                        >
-                           <Save size={12} /> Descargar
-                        </a>
-                        <button 
-                          onClick={() => setActiveAttachment(null)}
-                          className="text-[10px] uppercase font-bold tracking-widest text-slate-500 hover:text-white transition-colors px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md"
-                        >
-                           Cerrar [ESC]
-                        </button>
-                     </div>
-                  </div>
-                  
-                  <div id="annex-viewer-container" className="flex-1 bg-black/80 p-6 flex flex-col items-center justify-center relative overflow-hidden">
-                     {activeAttachment.type === 'image' && (
-                        <div className="w-full h-full max-w-5xl flex items-center justify-center overflow-auto rounded-lg border border-white/10 relative">
-                           <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay z-0 pointer-events-none"></div>
-                           <img 
-                             src={`/api/annexes/${study.studyInstanceUID}/${activeAttachment.id}`} 
-                             alt={activeAttachment.name}
-                             style={{ 
-                               transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
-                               transition: 'transform 0.2s ease-out'
-                             }}
-                             className="max-w-full max-h-full object-contain drop-shadow-2xl z-10 origin-center"
-                           />
-                        </div>
-                     )}
-                     {activeAttachment.type === 'pdf' && (
-                        <div className="w-full h-full flex items-center justify-center rounded-lg border border-white/10 overflow-hidden bg-white/90">
-                           <iframe 
-                             src={`/api/annexes/${study.studyInstanceUID}/${activeAttachment.id}#view=FitH&zoom=${zoomLevel * 100}`} 
-                             style={{
-                               transform: `rotate(${rotation}deg)`,
-                               transition: 'transform 0.2s ease-out'
-                             }}
-                             className="w-full h-full border-0 transform-gpu"
-                             title={activeAttachment.name}
-                           />
-                        </div>
-                     )}
-                     
-                     <div className="absolute bottom-6 right-6 pointer-events-none">
-                       <span className="px-3 py-1 bg-black/80 backdrop-blur border border-white/10 rounded text-[10px] text-slate-400 font-mono shadow-xl relative z-20">
-                          {activeAttachment.type.toUpperCase()} / {study.studyInstanceUID}
-                       </span>
-                     </div>
-                  </div>
-               </motion.div>
-            </motion.div>
+                {/* Cabecera del Visor Flotante (Handle del Drag) */}
+                <div className="p-3 border-b border-white/10 bg-white/5 flex items-center justify-between shrink-0 cursor-move">
+                   <div className="flex items-center gap-3">
+                      <div className="flex gap-1.5 mr-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-rose-500/50" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/50" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/50" />
+                      </div>
+                      <FileText size={16} className="text-cyan-400" />
+                      <h2 className="text-xs font-bold text-white truncate max-w-[200px]">{activeAttachment.name}</h2>
+                   </div>
+                   
+                   <div className="flex items-center gap-2">
+                      {/* Control de Opacidad */}
+                      <div className="flex items-center gap-2 px-3 border-r border-white/10 mr-1">
+                         <span className="text-[10px] text-slate-500 font-bold uppercase">Opacidad</span>
+                         <input 
+                           type="range" 
+                           min="0.2" 
+                           max="1" 
+                           step="0.1" 
+                           value={viewerOpacity}
+                           onChange={(e) => setViewerOpacity(parseFloat(e.target.value))}
+                           className="w-16 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                         />
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                         <button 
+                           onClick={() => window.open(activeAttachment.url, '_blank')}
+                           className="p-1.5 hover:bg-white/10 text-slate-400 hover:text-white rounded transition-colors" 
+                           title="Abrir en ventana externa (Pop-out)"
+                         >
+                           <ExternalLink size={14} />
+                         </button>
+                         <button 
+                           onClick={() => setIsViewerDocked(true)}
+                           className="p-1.5 hover:bg-white/10 text-slate-400 hover:text-white rounded transition-colors" 
+                           title="Anclar a la Vista (Side-by-Side)"
+                         >
+                           <Layout size={14} />
+                         </button>
+                         <button 
+                           onClick={() => setActiveAttachment(null)}
+                           className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded transition-colors ml-1"
+                         >
+                           <X size={16} />
+                         </button>
+                      </div>
+                   </div>
+                </div>
+
+                {/* Toolbar de Visualización */}
+                <div className="px-4 py-2 border-b border-white/5 bg-black/40 flex items-center justify-between shrink-0">
+                   <div className="flex items-center gap-1">
+                      <button onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.25))} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors">
+                        <ZoomOut size={13} />
+                      </button>
+                      <span className="text-[10px] font-mono text-slate-400 w-8 text-center">{Math.round(zoomLevel * 100)}%</span>
+                      <button onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.25))} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors">
+                        <ZoomIn size={13} />
+                      </button>
+                   </div>
+                   
+                   <div className="flex items-center gap-1">
+                      <button onClick={() => setRotation(prev => (prev + 90) % 360)} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded transition-colors" title="Rotar 90º">
+                        <RotateCw size={13} />
+                      </button>
+                      <a 
+                        href={activeAttachment.url}
+                        download
+                        className="flex items-center gap-1.5 text-[9px] uppercase font-bold tracking-widest text-cyan-400 hover:text-cyan-300 transition-colors px-3 py-1.5 bg-cyan-500/10 rounded-md ml-2"
+                      >
+                         <Save size={11} /> Descargar
+                      </a>
+                   </div>
+                </div>
+                
+                {/* Contenedor del Archivo */}
+                <div id="annex-viewer-container" className="flex-1 bg-black/80 flex flex-col items-center justify-center relative overflow-hidden">
+                   {activeAttachment.type === 'image' && (
+                      <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
+                         <img 
+                           src={activeAttachment.url} 
+                           alt={activeAttachment.name}
+                           style={{ 
+                             transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
+                             transition: 'transform 0.2s ease-out'
+                           }}
+                           className="max-w-full max-h-full object-contain drop-shadow-2xl z-10"
+                         />
+                      </div>
+                   )}
+                   {activeAttachment.type === 'pdf' && (
+                      <div className="w-full h-full flex items-center justify-center bg-white/90">
+                         <iframe 
+                           src={`${activeAttachment.url}#view=FitH&zoom=${zoomLevel * 100}`} 
+                           className="w-full h-full border-0"
+                           title={activeAttachment.name}
+                         />
+                      </div>
+                   )}
+                </div>
+             </motion.div>
          )}
       </AnimatePresence>
 

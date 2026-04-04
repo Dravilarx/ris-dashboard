@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createColumnHelper,
@@ -20,13 +20,16 @@ import {
   Search,
   Activity,
   Layers,
-  ArrowRight
+  ArrowRight,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Study, EnrichedStudy } from '@/types/ris';
 import { useDiagnosis } from '@/components/providers/DiagnosisProvider';
+import { supabase } from '@/lib/supabase';
 import {
   DndContext,
   KeyboardSensor,
@@ -167,6 +170,68 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
   const router = useRouter();
+
+  // ─── AMIS ROLE SYSTEM (demo switcher — replace with auth session in prod) ───────
+  type AmisRole = 'MED_STAFF' | 'MED_CHIEF' | 'MED_RESIDENT' | 'MED_REQUIRES_COSIGN' | 'ADMIN_SECRETARY';
+  const [currentRole, setCurrentRole] = useState<AmisRole>('MED_STAFF');
+  const canSupervise = currentRole === 'MED_STAFF' || currentRole === 'MED_CHIEF';
+
+  // ─── WORKLIST TABS ──────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<'worklist' | 'supervision'>('worklist');
+
+  // Pending cosign studies (in prod: query v_supervision_inbox where pending_cosign_by_id = currentUser.id)
+  type CosignItem = { id: string; paciente_nombre: string; modalidad: string; draft_author_name: string; accession_number: string; examen_nombre: string; };
+  const [pendingCosign, setPendingCosign] = useState<CosignItem[]>([]);
+
+  useEffect(() => {
+    if (!canSupervise) return;
+    supabase
+      .from('v_supervision_inbox')
+      .select('id, paciente_nombre, modalidad, draft_author_name, accession_number, examen_nombre')
+      .then(({ data: rows }) => {
+        if (rows) setPendingCosign(rows as CosignItem[]);
+      });
+
+    const ch = supabase
+      .channel('supervision-inbox-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'multiris_production' }, async () => {
+        const { data: rows } = await supabase.from('v_supervision_inbox').select('id, paciente_nombre, modalidad, draft_author_name, accession_number, examen_nombre');
+        if (rows) setPendingCosign(rows as CosignItem[]);
+      }).subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [canSupervise]);
+
+  // ─── ADDENDUM REALTIME SCANNER ───────────────────────────────────────────
+  // Maps studyInstanceUID → addendum request_text for pending requests
+  const [pendingAddendums, setPendingAddendums] = useState<Record<string, string>>({});
+
+  const fetchPendingAddendums = useCallback(async () => {
+    const { data: rows, error } = await supabase
+      .from('addendum_requests')
+      .select('study_uid, request_text')
+      .eq('status', 'PENDING');
+    if (error) { console.error('[Addendum Scanner]', error); return; }
+    const map: Record<string, string> = {};
+    rows?.forEach(r => { map[r.study_uid] = r.request_text; });
+    setPendingAddendums(map);
+  }, []);
+
+  useEffect(() => {
+    fetchPendingAddendums();
+
+    const channel = supabase
+      .channel('addendum-worklist-scanner')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'addendum_requests' },
+        () => fetchPendingAddendums()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchPendingAddendums]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleStartDiagnosis = () => {
     const study = data?.find(s => s.id === selectedId);
@@ -346,8 +411,119 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
         </div>
       </div>
 
-      {/* High Density Table Body */}
-      <div className="flex-1 overflow-auto scrollbar-hide">
+      {/* ═══ TAB BAR + ROLE DEMO SWITCHER ═══ */}
+      <div className="flex items-center border-b border-white/10 bg-white/[0.01]">
+        <button
+          onClick={() => setActiveTab('worklist')}
+          className={`px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 ${
+            activeTab === 'worklist'
+              ? 'text-cyan-400 border-cyan-400'
+              : 'text-slate-500 border-transparent hover:text-slate-300'
+          }`}
+        >
+          Worklist Activo
+        </button>
+        {canSupervise && (
+          <button
+            onClick={() => setActiveTab('supervision')}
+            className={`relative px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 ${
+              activeTab === 'supervision'
+                ? 'text-amber-400 border-amber-400'
+                : 'text-slate-500 border-transparent hover:text-amber-300'
+            }`}
+          >
+            Pendientes de mi Firma
+            {pendingCosign.length > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-[9px] font-black text-black animate-pulse">
+                {pendingCosign.length}
+              </span>
+            )}
+          </button>
+        )}
+        {/* DEV role switcher — replace with auth session in prod */}
+        <div className="ml-auto flex items-center gap-2 px-4">
+          <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">ROL:</span>
+          <select
+            value={currentRole}
+            onChange={e => { setCurrentRole(e.target.value as AmisRole); setActiveTab('worklist'); }}
+            className="text-[9px] bg-slate-900 border border-white/10 text-cyan-400 rounded px-2 py-1 font-black uppercase outline-none"
+          >
+            <option value="MED_STAFF">MED_STAFF</option>
+            <option value="MED_CHIEF">MED_CHIEF</option>
+            <option value="MED_RESIDENT">MED_RESIDENT</option>
+            <option value="MED_REQUIRES_COSIGN">COSIGN</option>
+            <option value="ADMIN_SECRETARY">SECRETARÍA</option>
+          </select>
+        </div>
+      </div>
+
+      {/* ═══ SUPERVISION INBOX (Staff / Chief only) ═══ */}
+      <AnimatePresence mode="wait">
+        {activeTab === 'supervision' && canSupervise && (
+          <motion.div
+            key="supervision-panel"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex-1 overflow-auto p-6 space-y-3"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                <AlertTriangle size={16} className="text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white tracking-tight">Supervisión de Borradores</h3>
+                <p className="text-[10px] text-slate-500">Informes de residentes que requieren tu firma para ser legalmente emitidos.</p>
+              </div>
+            </div>
+
+            {pendingCosign.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 opacity-30">
+                <AlertTriangle size={40} className="text-amber-400 mb-3" />
+                <p className="text-sm font-bold text-slate-400">Sin informes pendientes de firma</p>
+              </div>
+            ) : (
+              pendingCosign.map(item => (
+                <motion.div
+                  key={item.id}
+                  layout
+                  className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 hover:border-amber-400/40 hover:bg-amber-500/10 transition-all group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <span className="text-sm font-black text-white tracking-tight">{item.paciente_nombre}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-mono bg-white/5 px-2 py-0.5 rounded text-slate-400">{item.accession_number}</span>
+                        <span className="text-[9px] font-bold uppercase text-cyan-400 tracking-widest">{item.modalidad}</span>
+                        <span className="text-[9px] text-slate-500 truncate max-w-[200px]">{item.examen_nombre}</span>
+                      </div>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className="text-[9px] text-amber-400/70 font-bold uppercase tracking-widest">Borrador por:</span>
+                        <span className="text-[9px] font-black text-amber-300">{item.draft_author_name || 'Residente'}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => router.push(`/informe/${item.accession_number}?cosign=true`)}
+                      className="shrink-0 ml-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[10px] font-black text-black uppercase tracking-widest flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.3)] transition-all active:scale-95"
+                    >
+                      <CheckCircle2 size={12} /> Revisar y Firmar
+                    </button>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </motion.div>
+        )}
+
+        {activeTab === 'worklist' && (
+          <motion.div
+            key="worklist-table"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 overflow-auto scrollbar-hide"
+          >
+
         <DndContext
           collisionDetection={closestCenter}
           modifiers={[restrictToHorizontalAxis]}
@@ -371,7 +547,10 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
             </thead>
           <tbody>
             <AnimatePresence mode='popLayout'>
-              {table.getRowModel().rows.length > 0 ? table.getRowModel().rows.map(row => (
+              {table.getRowModel().rows.length > 0 ? table.getRowModel().rows.map(row => {
+                const studyUID = row.original.studyInstanceUID;
+                const hasPendingAddendum = studyUID && pendingAddendums[studyUID];
+                return (
                 <motion.tr 
                   layout
                   initial={{ opacity: 0, y: 10 }}
@@ -383,16 +562,32 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
                     "group transition-all duration-300 cursor-pointer border-l-4",
                     selectedId === row.original.id 
                       ? "bg-cyan-900/10 border-cyan-400 outline outline-1 outline-cyan-500/30 shadow-[inset_0_0_20px_rgba(6,182,212,0.05)]" 
-                      : "hover:bg-white/[0.04] border-transparent outline-transparent"
+                      : hasPendingAddendum
+                        ? "bg-rose-950/30 border-rose-500 hover:bg-rose-950/50 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]"
+                        : "hover:bg-white/[0.04] border-transparent outline-transparent"
                   )}
                 >
                   {row.getVisibleCells().map(cell => (
                     <td key={cell.id} className="px-6 py-4 border-b border-white/[0.03] align-middle">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {/* Inject addendum badge in the first cell */}
+                      {cell.column.id === 'patientFullName' && hasPendingAddendum ? (
+                        <div className="flex flex-col gap-1.5">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 text-[9px] font-black uppercase tracking-widest animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.3)]">
+                              <AlertTriangle size={9} className="shrink-0" />
+                              ⚠️ ADDENDUM SOLICITADO
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        flexRender(cell.column.columnDef.cell, cell.getContext())
+                      )}
                     </td>
                   ))}
                 </motion.tr>
-              )) : (
+                );
+              }) : (
                 <tr>
                   <td colSpan={5} className="py-20 text-center animate-pulse">
                     <div className="flex flex-col items-center gap-4 opacity-20">
@@ -406,7 +601,9 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
           </tbody>
         </table>
         </DndContext>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Selected Action Bar Footer */}
       <AnimatePresence>
