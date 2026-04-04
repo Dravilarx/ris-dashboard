@@ -71,7 +71,7 @@ const B2B_STUDIES: B2BStudy[] = [
 ];
 
 export default function B2BPortalPage() {
-  const [selectedStudy, setSelectedStudy] = useState<any>(null);
+  const [selectedStudy, setSelectedStudy] = useState<B2BStudy | null>(null);
 
   return (
     <div className="flex h-screen bg-[#020306] text-slate-200 overflow-hidden font-sans selection:bg-rose-500/30">
@@ -318,7 +318,7 @@ export default function B2BPortalPage() {
                             <span className="text-[11px] font-black uppercase tracking-widest text-rose-500">Instrucción del Médico</span>
                          </div>
                          <p className="text-sm text-slate-300 font-medium italic leading-relaxed">
-                            "{selectedStudy.pendingMessage}"
+                            &ldquo;{selectedStudy.pendingMessage}&rdquo;
                          </p>
                       </div>
 

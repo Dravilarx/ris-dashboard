@@ -6,9 +6,9 @@ import Link from 'next/link';
 import { 
   ArrowLeft, Monitor, Save, Activity, FileText, CheckCircle2, 
   ChevronLeft, ChevronRight, FileDigit, ScanFace, Sparkles,
-  Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Maximize, Clock, Stethoscope,
-  Plus, Edit2, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Wifi, Loader2,
-  LayoutGrid, List, Columns, ExternalLink, Layout, Minimize2, Eye, Printer, User, Calendar, ClipboardList
+  Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Clock, Stethoscope,
+  Plus, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Loader2,
+  LayoutGrid, List, ExternalLink, Layout, Minimize2, Eye, Printer, ClipboardList
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react'; 
 import { supabase } from '@/lib/supabase';
@@ -164,7 +164,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
 
   // IA State
   const [isReviewingAI, setIsReviewingAI] = useState(false);
-  const [aiReviewResults, setAiReviewResults] = useState<{ alerts: string[], suggestion: string, correctedSections?: any, corrections?: string[] } | null>(null);
+  const [aiReviewResults, setAiReviewResults] = useState<{ alerts: string[], suggestion: string, correctedSections?: Record<string, string>, corrections?: string[] } | null>(null);
   const [showAIResults, setShowAIResults] = useState(false);
   
   const getFullText = () => [
@@ -185,7 +185,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   useEffect(() => {
     const saved = localStorage.getItem(`dictation_draft_${study.studyInstanceUID}`);
     if (saved) {
-      try { setSections(JSON.parse(saved)); } catch (e) {}
+      try { setSections(JSON.parse(saved)); } catch {}
     }
   }, [study.studyInstanceUID]);
 
@@ -275,8 +275,8 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
           table: 'remote_dictation_sessions', 
           filter: `study_uid=eq.${study.studyInstanceUID}` 
         },
-        (payload: any) => {
-          const data = payload.new;
+        (payload: { new: any }) => {
+          const data = payload.new as any;
           if (!data) return;
 
           // Connection status
@@ -374,10 +374,10 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   };
 
   const handleApplyTemplate = (text: string) => {
-    let technique = text.match(/TÉCNICA DE ESTUDIO:\s*([\s\S]*?)(?=ANTECEDENTES:|HALLAZGOS:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
-    let history = text.match(/ANTECEDENTES:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|HALLAZGOS:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
-    let findings = text.match(/HALLAZGOS:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|ANTECEDENTES:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
-    let impression = text.match(/IMPRESIÓN DIAGNÓSTICA:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|ANTECEDENTES:|HALLAZGOS:|$)/i)?.[1]?.trim() || '';
+    const technique = text.match(/TÉCNICA DE ESTUDIO:\s*([\s\S]*?)(?=ANTECEDENTES:|HALLAZGOS:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
+    const history = text.match(/ANTECEDENTES:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|HALLAZGOS:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
+    const findings = text.match(/HALLAZGOS:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|ANTECEDENTES:|IMPRESIÓN DIAGNÓSTICA:|$)/i)?.[1]?.trim() || '';
+    const impression = text.match(/IMPRESIÓN DIAGNÓSTICA:\s*([\s\S]*?)(?=TÉCNICA DE ESTUDIO:|ANTECEDENTES:|HALLAZGOS:|$)/i)?.[1]?.trim() || '';
 
     if (!technique && !history && !findings && !impression) {
        setSections(prev => ({ ...prev, [activeSection]: prev[activeSection] + (prev[activeSection] ? "\n" : "") + text.trim() }));
@@ -1259,7 +1259,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                            {aiReviewResults.correctedSections ? (
                               <button 
                                 onClick={() => {
-                                   setSections(aiReviewResults.correctedSections);
+                                   setSections(aiReviewResults.correctedSections as { technique: string; history: string; findings: string; impression: string; });
                                    setShowAIResults(false);
                                 }}
                                 className="w-full py-2.5 bg-purple-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.4)] flex items-center justify-center gap-2"
