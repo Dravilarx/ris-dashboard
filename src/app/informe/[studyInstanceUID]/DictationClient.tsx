@@ -269,29 +269,19 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [dictPrefill, setDictPrefill] = useState('');
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── SELECCIÓN → DICCIONARIO ──────────────────────────────────────────────────
-  const [selectionTooltip, setSelectionTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    const handleMouseUp = (e: MouseEvent) => {
-      const sel = window.getSelection();
-      const word = sel?.toString().trim();
-      if (!word || word.length < 2 || word.includes('\n')) {
-        setSelectionTooltip(null);
-        return;
-      }
-      // Only inside the editor container
-      const container = editorContainerRef.current;
-      if (!container) { setSelectionTooltip(null); return; }
-      const range = sel?.getRangeAt(0);
-      const rangeRect = range?.getBoundingClientRect();
-      if (!rangeRect) { setSelectionTooltip(null); return; }
-      // Check if selection is inside our editor
-      if (!container.contains(sel?.anchorNode ?? null)) { setSelectionTooltip(null); return; }
-      setSelectionTooltip({ text: word, x: rangeRect.left + rangeRect.width / 2, y: rangeRect.top - 8 });
-    };
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
+  // ── SELECCIÓN → DICCIONARIO (abre el panel directamente) ──────────────────
+  // window.getSelection() no funciona en <textarea>; usamos selectionStart/End.
+  const handleEditorMouseUp = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLTextAreaElement;
+    if (target.tagName !== 'TEXTAREA') return;
+    const start = target.selectionStart;
+    const end   = target.selectionEnd;
+    if (start == null || end == null || start === end) return;
+    const selected = target.value.substring(start, end).trim();
+    if (!selected || selected.length < 2 || selected.includes('\n')) return;
+    // Abre el diccionario inmediatamente con la palabra pre-cargada
+    setDictPrefill(selected);
+    setShowDictionary(true);
   }, []);
 
   // ── SLASH COMMAND STATE (/snippet fuzzy menu) ──────────────────────────────
@@ -1764,7 +1754,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
             </AnimatePresence>
 
            {/* Editor Area */}
-           <div className="flex-1 px-16 py-12 relative overflow-hidden flex justify-center">
+           <div className="flex-1 px-16 py-12 relative overflow-hidden flex justify-center" onMouseUp={handleEditorMouseUp}>
               
               <div className="w-full max-w-5xl mx-auto flex flex-col gap-5 px-4 pt-6 pb-28 custom-scrollbar overflow-y-auto">
                 <div className="flex flex-col gap-2 relative">
@@ -2986,33 +2976,6 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
               </div>
             </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-
-      {/* ─── Tooltip Flotante: Selección → Diccionario ─────────────────────────── */}
-      <AnimatePresence>
-        {selectionTooltip && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.8, y: 4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 4 }}
-            transition={{ duration: 0.12 }}
-            onClick={() => {
-              setDictPrefill(selectionTooltip.text);
-              setShowDictionary(true);
-              setSelectionTooltip(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-            className="fixed z-[300] flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-black uppercase tracking-widest shadow-[0_4px_20px_rgba(139,92,246,0.5)] transition-colors"
-            style={{
-              left: selectionTooltip.x,
-              top: selectionTooltip.y,
-              transform: 'translate(-50%, -100%)',
-            }}
-          >
-            ➕ Entrenar palabra
-          </motion.button>
         )}
       </AnimatePresence>
 

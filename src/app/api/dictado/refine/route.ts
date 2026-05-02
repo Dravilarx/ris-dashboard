@@ -87,6 +87,7 @@ interface DictionaryEntry {
   heard: string;
   correct: string;
   section?: string;
+  contextKeywords?: string; // Palabras clave que condicionan la corrección
   notes?: string;
 }
 
@@ -115,27 +116,25 @@ function buildUserPrompt(
   }
   if (ctxParts.length) parts.push(`[${ctxParts.join(' | ')}]`);
 
-  // Learning dictionary
+  // Learning dictionary — context-aware injection
   if (dictionary && dictionary.length > 0) {
-    const lines = dictionary
-      .filter(e => !e.section || e.section === metadata?.activeSection)
-      .map(e => {
-        const note = e.notes ? ` (${e.notes})` : '';
-        return `  • "${e.heard}" → "${e.correct}"${note}`;
-      });
+    const activeSection = metadata?.activeSection;
+    const applicable = dictionary.filter(e => !e.section || e.section === activeSection);
 
-    // Also include global entries (no section restriction)
-    const globalLines = dictionary
-      .filter(e => !e.section)
-      .map(e => {
-        const note = e.notes ? ` (${e.notes})` : '';
-        return `  • "${e.heard}" → "${e.correct}"${note}`;
+    if (applicable.length > 0) {
+      const lines = applicable.map(e => {
+        let rule = `  • "${e.heard}" → "${e.correct}"`;
+        if (e.contextKeywords) {
+          rule += ` [SOLO si el texto contiene: ${e.contextKeywords}]`;
+        }
+        if (e.notes) rule += ` (${e.notes})`;
+        return rule;
       });
-
-    const allLines = [...new Set([...lines, ...globalLines])];
-    if (allLines.length > 0) {
       parts.push(
-        `DICCIONARIO DE CORRECCIÓN PERSONALIZADO (prioridad máxima — aplicar siempre):\n${allLines.join('\n')}`
+        `DICCIONARIO DE CORRECCIÓN PERSONALIZADO (prioridad máxima):\n` +
+        `  — Si la regla tiene condición [SOLO si...], aplícala únicamente cuando esas palabras aparezcan en el mismo campo.\n` +
+        `  — Si no tiene condición, aplícala siempre.\n` +
+        lines.join('\n')
       );
     }
   }
