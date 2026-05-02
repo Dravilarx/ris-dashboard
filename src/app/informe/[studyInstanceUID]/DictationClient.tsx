@@ -81,7 +81,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   };
   // ─── AMIS ROLE SYSTEM ────────────────────────────────────────────────────
   type AmisRole = 'MED_STAFF' | 'MED_CHIEF' | 'MED_RESIDENT' | 'MED_REQUIRES_COSIGN';
-  const [userRole, setUserRole] = useState<AmisRole>('MED_RESIDENT');
+  const [userRole, setUserRole] = useState<AmisRole>('MED_STAFF'); // Default: Staff (puede cambiar a Residente en el header)
   const canSign = userRole === 'MED_STAFF' || userRole === 'MED_CHIEF';
   const isResident = userRole === 'MED_RESIDENT' || userRole === 'MED_REQUIRES_COSIGN';
   // ─────────────────────────────────────────────────────────────────────────
@@ -1997,38 +1997,35 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                   <Clock size={13} /> Pausar
                 </button>
 
-                {/* Acción primaria: Informar (residente) o Validar (staff) */}
-                {canSign ? (
-                  /* STAFF / JEFE → Validar y Firmar */
-                  <button
-                    disabled={!isAllFilled}
-                    onClick={() => {
-                      if (!isAllFilled) return;
-                      setBaseSections(sections);
-                      setValidationAction('validate');
-                      setShowValidationModal(true);
-                    }}
-                    className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-black bg-[#39FF14] hover:bg-[#4fff30] disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(57,255,20,0.25)] hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] transition-all active:scale-95"
-                    title="Validar y Firmar como responsable legal"
-                  >
-                    <CheckCircle2 size={14} /> Validar
-                  </button>
-                ) : (
-                  /* RESIDENTE → Informar (envía a supervisor) */
-                  <button
-                    disabled={!isAllFilled}
-                    onClick={() => {
-                      if (!isAllFilled) return;
-                      setBaseSections(sections);
-                      setValidationAction('inform');
-                      setShowValidationModal(true);
-                    }}
-                    className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(59,130,246,0.25)] hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] transition-all active:scale-95"
-                    title="Informar estudio y enviar al supervisor"
-                  >
-                    <Stethoscope size={14} /> Informar
-                  </button>
-                )}
+                {/* Acción primaria: Informar (siempre visible) */}
+                <button
+                  disabled={!isAllFilled}
+                  onClick={() => {
+                    if (!isAllFilled) return;
+                    setBaseSections(sections);
+                    setValidationAction('inform');
+                    setShowValidationModal(true);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(59,130,246,0.25)] hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] transition-all active:scale-95"
+                  title="Informar estudio (envía a supervisor si eres residente)"
+                >
+                  <Stethoscope size={14} /> Informar
+                </button>
+
+                {/* Acción Staff: Validar y Firmar (siempre visible, restringido si no es Staff) */}
+                <button
+                  disabled={!isAllFilled || !canSign}
+                  onClick={() => {
+                    if (!isAllFilled || !canSign) return;
+                    setBaseSections(sections);
+                    setValidationAction('validate');
+                    setShowValidationModal(true);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-black bg-[#39FF14] hover:bg-[#4fff30] disabled:opacity-30 disabled:cursor-not-allowed disabled:grayscale shadow-[0_0_18px_rgba(57,255,20,0.25)] hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] transition-all active:scale-95"
+                  title={!canSign ? 'Solo disponible para Médico Staff — cambia el rol arriba' : 'Validar y Firmar como responsable legal'}
+                >
+                  <CheckCircle2 size={14} /> Validar
+                </button>
               </div>
             </div>
 
