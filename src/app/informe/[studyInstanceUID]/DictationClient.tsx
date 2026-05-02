@@ -1846,7 +1846,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '60px', wordBreak: 'break-words' }}>
                         {sections.technique}{' '}
                       </div>
-                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.technique, sections.technique)}     
                       </div>
                       <textarea
@@ -1875,7 +1875,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '60px', wordBreak: 'break-words' }}>
                         {sections.history}{' '}
                       </div>
-                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.history, sections.history)}
                       </div>
                       <textarea
@@ -1904,7 +1904,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '160px', wordBreak: 'break-words' }}>
                         {sections.findings}{' '}
                       </div>
-                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', wordBreak: 'break-words' }}>
                         {renderDiff(baseSections.findings, sections.findings)}
                       </div>
                       <textarea
@@ -1934,7 +1934,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                       <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '120px', wordBreak: 'break-words' }}>
                         {sections.impression}{' '}
                       </div>
-                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.impression, sections.impression)}
                       </div>
                       <textarea

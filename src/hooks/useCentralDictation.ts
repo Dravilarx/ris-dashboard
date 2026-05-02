@@ -63,8 +63,11 @@ export interface UseCentralDictationReturn {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-const DEFAULT_SERVER_URL = 'http://localhost:8769';
-const HEALTH_CHECK_INTERVAL_MS = 60_000; // 1 minuto
+// Puerto 8769 = servidor AMIS-Voice local (Whisper en el Mac Mini).
+// Si no está activo, el sistema redirige automáticamente al endpoint interno Next.js.
+const DEFAULT_SERVER_URL = process.env.NEXT_PUBLIC_AMIS_VOICE_URL || 'http://localhost:8769';
+const FALLBACK_SERVER_URL = '/api/dictado/transcribe-local'; // Usa Whisper vía API interna
+const HEALTH_CHECK_INTERVAL_MS = 120_000; // 2 min (menos ruido en consola)
 const MAX_RECORDING_SECONDS = 120;
 
 export function useCentralDictation({
@@ -93,20 +96,24 @@ export function useCentralDictation({
   const healthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendToServerRef = useRef<(blob: Blob) => void>(() => {});
 
+  const [useLocalFallback, setUseLocalFallback] = useState(false);
+
   // ── Health Check ──────────────────────────────────────────────────────────
   const checkServer = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch(`${serverUrl}/health`, {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
-        if (isMountedRef.current) setServerStatus('online');
+        if (isMountedRef.current) { setServerStatus('online'); setUseLocalFallback(false); }
         return true;
       }
-      if (isMountedRef.current) setServerStatus('offline');
+      // Server responded but with error — still use local fallback
+      if (isMountedRef.current) { setServerStatus('offline'); setUseLocalFallback(true); }
       return false;
     } catch {
-      if (isMountedRef.current) setServerStatus('offline');
+      // Silently mark as offline — no console spam for ERR_CONNECTION_REFUSED
+      if (isMountedRef.current) { setServerStatus('offline'); setUseLocalFallback(true); }
       return false;
     }
   }, [serverUrl]);
@@ -337,9 +344,13 @@ export function useCentralDictation({
     if (!isMountedRef.current) return;
     
     try {
-      console.info(`[AMIS Voice] 📤 Enviando ${(blob.size / 1024).toFixed(0)}KB al servidor...`);
+      // Use local fallback if voice server is unavailable
+      const endpoint = useLocalFallback
+        ? FALLBACK_SERVER_URL
+        : `${serverUrl}/transcribe`;
+      console.info(`[AMIS Voice] 📤 Enviando ${(blob.size / 1024).toFixed(0)}KB a ${useLocalFallback ? 'API interna' : 'servidor voz'}...`);
       
-      const res = await fetch(`${serverUrl}/transcribe`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': blob.type || 'audio/webm' },
         body: blob,
