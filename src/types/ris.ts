@@ -190,6 +190,12 @@ export interface WorklistFilters {
   timeRange?: 'today' | '24h' | 'all';
   /** Tipo de urgencia */
   urgencyType?: string;
+  /**
+   * Búsqueda global histórica por RUT, nombre o número de acceso.
+   * Cuando está presente, anula TODOS los filtros de fecha y
+   * consulta la base de datos completa (histórico de todos los años).
+   */
+  q?: string;
 }
 
 /** Modos de visualización para diagnóstico */

@@ -178,6 +178,8 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [eduExportStudyId, setEduExportStudyId] = useState<number | null>(null);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  // Estado de disponibilidad del Visor DICOM MedDream
+  const [meddreamToast, setMeddreamToast] = useState<'idle' | 'opening' | 'unavailable'>('idle');
   const router = useRouter();
 
   // ─── AMIS ROLE SYSTEM (demo switcher — replace with auth session in prod) ───────
@@ -341,17 +343,38 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
     const study = data?.find(s => s.id === selectedId);
     if (!study) return;
 
-    // Ajustado a la IP/Puerto local del Visor MedDream real que usabas en DictationClient: 
-    const meddreamUrl = `http://localhost:8080/meddream/?study=${study.studyInstanceUID || study.accessionNumber}`;
-    console.log(`[MedDream Integration] URL Generated: ${meddreamUrl}`);
+    // ─── VISOR DICOM (MedDream) ──────────────────────────────────────────────
+    // Intentar abrir MedDream en Monitor 2. Si no está disponible (puerto 8080
+    // sin servidor), el popup simplemente fallará — NO bloqueamos la navegación.
+    const studyUID = study.studyInstanceUID || study.accessionNumber;
+    const meddreamUrl = `http://localhost:8080/meddream/?study=${studyUID}`;
+    console.log(`[MedDream] Intentando abrir visor DICOM: ${meddreamUrl}`);
 
-    // Abrir MedDream en Monitor 2 usando window.open (popup mode idealmente)
-    // Pasamos el UID real del estudio
-    const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
-    window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
+    setMeddreamToast('opening');
 
-    // Navegar en el Monitor 1 a la interfaz de informe
-    router.push(`/informe/${study.studyInstanceUID}`);
+    // Intentar detectar si MedDream responde antes de abrir la ventana
+    fetch('http://localhost:8080/', { mode: 'no-cors', signal: AbortSignal.timeout(2000) })
+      .then(() => {
+        // MedDream parece disponible — abrir en Monitor 2
+        const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
+        window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
+        setMeddreamToast('idle');
+      })
+      .catch(() => {
+        // MedDream no disponible — notificar pero continuar al informe
+        console.warn('[MedDream] Visor DICOM no disponible en localhost:8080');
+        setMeddreamToast('unavailable');
+        setTimeout(() => setMeddreamToast('idle'), 5000);
+      });
+
+    // Siempre navegar al panel de informe (Monitor 1)
+    // No esperar MedDream para no bloquear el flujo del radiólogo
+    if (study.studyInstanceUID) {
+      router.push(`/informe/${study.studyInstanceUID}`);
+    } else {
+      console.error('[MedDream] studyInstanceUID no disponible para el estudio', study.id);
+      setMeddreamToast('unavailable');
+    }
   };
 
   // ─── PRIORIDAD DE RETORNO: estudios resueltos por el centro saltan al tope ───
@@ -524,6 +547,26 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
       "w-full h-full flex flex-col transition-all duration-700 relative overflow-hidden",
       mode === 'high-contrast' ? "bg-black brightness-[1.1] contrast-[1.2]" : "bg-transparent"
     )}>
+      {/* ─── TOAST DE ESTADO MEDDREAM ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {meddreamToast !== 'idle' && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`absolute top-4 right-4 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl border text-xs font-bold shadow-2xl backdrop-blur-xl ${
+              meddreamToast === 'opening'
+                ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+            }`}
+          >
+            <Monitor size={14} className={meddreamToast === 'opening' ? 'animate-pulse' : ''} />
+            {meddreamToast === 'opening'
+              ? 'Conectando con Visor DICOM...'
+              : 'Visor DICOM no disponible. Continuando en modo dictado.'}
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Search & Tool Bar - Glassmorphism Refined */}
       <div className="p-4 bg-white/[0.02] backdrop-blur-2xl border-b border-white/10 flex justify-between items-center z-50">
         <div className="flex items-center gap-6 flex-1 max-w-2xl text-left">

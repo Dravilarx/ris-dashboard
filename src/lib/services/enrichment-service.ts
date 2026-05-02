@@ -154,39 +154,61 @@ function resolveAdaptiveIdentity(
 }
 
 /**
- * Servicio Central de Alta Performance.
+ * Calcula los milisegundos restantes hasta el vencimiento del SLA de un estudio.
+ * Valor negativo = vencido (maxima prioridad).
+ * Valor positivo = tiempo restante en ms (menor = mas urgente).
+ */
+function getSLARemainingMs(study: EnrichedStudy): number {
+  const now = Date.now();
+  const ingressMs = new Date(study.studyDate).getTime();
+  const urgency = (study.urgencyType || '').toLowerCase();
+
+  let slaMinutes: number;
+  if (urgency.includes('critic')) {
+    slaMinutes = study.expectedSLACriticalMinutes || 30;
+  } else if (urgency.includes('urg')) {
+    slaMinutes = study.expectedSLAUrgentMinutes || 60;
+  } else {
+    slaMinutes = study.expectedSLANormalMinutes || 240;
+  }
+
+  const deadlineMs = ingressMs + slaMinutes * 60 * 1000;
+  return deadlineMs - now;
+}
+
+/**
+ * Servicio Central de Alta Performance con ordenamiento por vencimiento SLA.
+ *
+ * Para ventanas activas (today/24h): carga TODOS los registros del periodo,
+ * los enriquece, los ordena por tiempo restante de entrega (SLA multicentro)
+ * y luego pagina en memoria.
+ *
+ * Para busqueda global (q) y historico (all): usa paginacion de la BD.
  */
 export async function fetchEnrichedWorklist(
   pagination: any,
   filters: any
 ): Promise<PaginatedResult<EnrichedStudy>> {
-  
-  // 1. Origen A: SQL Server Legacy (VPN) - Bloquea para tener datos inmediatos
-  const legacyResult = await getWorklist(pagination, filters);
-  
-  // 2. Origen B: Supabase SaaS (AMIS 3.0 Cache) - Non-blocking effect handled by cache/timeout
+
+  const isActiveWindow = !filters.q && (filters.timeRange === 'today' || filters.timeRange === '24h');
+  const MAX_SLA_SORT_RECORDS = 1500; // limite de seguridad para la ventana activa
+
   const mappings = await fetchMappingsFromAmis3();
 
-  // 3. Enriquecimiento y Garantía de Datos
-  const enrichedData: EnrichedStudy[] = legacyResult.data.map((study, index) => {
-    // Si la DB tiene mapeado en study un id_radiologo, lo usaríamos. Como fallback usamos un parse simple.
-    // Usaremos el ID = 1 para forzar la prueba de fuego de AMIS como se solicitó "Si es el Legacy 1..."
-    // asumiendo que el ID de la institución es 1.
+  // Funcion interna de enriquecimiento (reutilizable)
+  const enrichStudy = (study: any, index: number): EnrichedStudy => {
     const instMapping = mappings.institutions[study.institutionId];
-    const realInstitution = instMapping?.name || study.institutionName || 'Institución Desconocida';
-    
-    // Tratamos el blockUserId o 1 como proxy del legacy_id del médico en este stub
-    // idealmente tendríamos study.radiologistId si la Query lo extrajera. (El seed pedía Médico 1).
-    const docId = study.radiologistUsername ? 1 : 1; 
+    const realInstitution = instMapping?.name || study.institutionName || 'Institucion Desconocida';
+
+    const docId = study.radiologistUsername ? 1 : 1;
     const mappedDoctor = mappings.doctors[docId];
-    const realDoctor = mappedDoctor 
-      ? `Dr/a. ${mappedDoctor}` 
+    const realDoctor = mappedDoctor
+      ? `Dr/a. ${mappedDoctor}`
       : (study.radiologistUsername ? `Staff (${study.radiologistUsername})` : 'NO ASIGNADO');
 
-    // Mapeo SLA por Categoría + Modalidad
-    const category = normalizeCategory(study.urgencyType || "");
-    const modality = study.modality || "RX";
-    let expectedMins = 60; // Hard default preventivo
+    const category = normalizeCategory(study.urgencyType || '');
+    const modality = study.modality || 'RX';
+    let expectedMins = 60;
 
     if (instMapping?.id && mappings.slas[instMapping.id]) {
       const instSlas = mappings.slas[instMapping.id];
@@ -195,17 +217,9 @@ export async function fetchEnrichedWorklist(
       }
     }
 
-    // Para nuestra UI (que pide Normal/Urgent/Crit basado en el mismo timer)
-    // Pasaremos el minuto que corresponde a SU categoría como criterio Critical:
     const criticalMins = expectedMins;
-    const urgentMins = Math.floor(expectedMins * 0.75); // 75% del SLA
+    const urgentMins = Math.floor(expectedMins * 0.75);
     const normalMins = expectedMins;
-
-    // ----- MOCK UI PRESENTATION -----
-    let mockPriorityReturn = false;
-    if (index === 0) {
-      mockPriorityReturn = true; // Primer estudio simulado como retorno urgente de pausa B2B
-    }
 
     return {
       ...study,
@@ -214,17 +228,40 @@ export async function fetchEnrichedWorklist(
       expectedSLACriticalMinutes: criticalMins,
       expectedSLAUrgentMinutes: urgentMins,
       expectedSLANormalMinutes: normalMins,
-      isHighPriorityReturn: mockPriorityReturn,
-      // ─── IDENTIDAD ADAPTATIVA ────────────────────────────────
+      isHighPriorityReturn: false,
       ...resolveAdaptiveIdentity(study, mappings.centerIdentities),
     };
-  });
+  };
 
-  // MOCK HISTORY DATA FOR SECOND STUDY
-  if (enrichedData.length > 1) {
-    enrichedData[1].effectivePatientId = enrichedData[0].effectivePatientId;
-    enrichedData[1].patientId = enrichedData[0].patientId;
+  // VENTANA ACTIVA: fetch completo + sort SLA + paginacion en memoria
+  if (isActiveWindow) {
+    const fullResult = await getWorklist({ page: 1, pageSize: MAX_SLA_SORT_RECORDS }, filters);
+
+    const enrichedAll = fullResult.data.map((s, i) => enrichStudy(s, i));
+
+    // Ordenar por tiempo restante SLA (vencidos primero, luego por urgencia)
+    enrichedAll.sort((a, b) => getSLARemainingMs(a) - getSLARemainingMs(b));
+
+    // Paginar en memoria
+    const { page: rawPage, pageSize: rawSize } = pagination;
+    const safePage = Math.max(1, parseInt(String(rawPage)) || 1);
+    const safePageSize = Math.max(1, parseInt(String(rawSize)) || 30);
+    const offset = (safePage - 1) * safePageSize;
+    const sliced = enrichedAll.slice(offset, offset + safePageSize);
+    const total = fullResult.total;
+
+    return {
+      data: sliced,
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      totalPages: Math.ceil(total / safePageSize),
+    };
   }
+
+  // BUSQUEDA GLOBAL / HISTORICO: paginacion de la BD, sin sort SLA
+  const legacyResult = await getWorklist(pagination, filters);
+  const enrichedData = legacyResult.data.map((s, i) => enrichStudy(s, i));
 
   return {
     ...legacyResult,

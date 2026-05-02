@@ -27,7 +27,14 @@ export interface UseOllamaRefineReturn {
   lastDurationMs: number | null;
   refine: (
     sections: { technique: string; history: string; findings: string; impression: string },
-    metadata?: { modality?: string; studyDescription?: string; sex?: string; age?: string }
+    metadata?: {
+      modality?: string;
+      studyDescription?: string;
+      sex?: string;
+      age?: string;
+      activeSection?: string;      // Campo del informe activo en el editor
+      dictionary?: Array<{ id: string; heard: string; correct: string; section?: string; notes?: string }>;
+    }
   ) => Promise<RefineResult | null>;
   checkOllamaHealth: () => Promise<boolean>;
 }
@@ -114,7 +121,14 @@ export function useOllamaRefine(): UseOllamaRefineReturn {
   // ── Refinar ─────────────────────────────────────────────────────────────────
   const refine = useCallback(async (
     sections: { technique: string; history: string; findings: string; impression: string },
-    metadata?: { modality?: string; studyDescription?: string; sex?: string; age?: string }
+    metadata?: {
+      modality?: string;
+      studyDescription?: string;
+      sex?: string;
+      age?: string;
+      activeSection?: string;
+      dictionary?: Array<{ id: string; heard: string; correct: string; section?: string; notes?: string }>;
+    }
   ): Promise<RefineResult | null> => {
     const hasText = Object.values(sections).some(v => v.trim().length > 0);
     if (!hasText) { setLastError('No hay texto para refinar.'); return null; }
@@ -127,7 +141,7 @@ export function useOllamaRefine(): UseOllamaRefineReturn {
       const res = await fetch('/api/dictado/refine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sections, metadata }),
+        body: JSON.stringify({ sections, metadata, dictionary: metadata?.dictionary }),
         signal: AbortSignal.timeout(65000),  // 65s — dar margen a Gemma 2
       });
 

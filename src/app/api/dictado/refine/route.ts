@@ -3,36 +3,45 @@ import { NextResponse } from 'next/server';
 /**
  * /api/dictado/refine — Motor AMIS-Voice: Refinado Clínico via Ollama + Gemma 2
  *
- * Modelo exclusivo: gemma2 (Gemma 2 de Google, corriendo en Apple Silicon M2 Pro)
- * Conexión persistente: keep_alive=30m para evitar latencias de carga del modelo
- *
- * System Prompt AMIS oficial para corrección radiológica.
+ * v2.0 — Árbitro Anatómico + Diccionario de Aprendizaje + Limpieza de Ruido
+ * Modelo exclusivo: gemma2 (corriendo en Apple Silicon M2 Pro)
+ * Sistema: Experto en radiología con español chileno (seseo, confusión B/V)
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-const PRIMARY_MODEL = process.env.OLLAMA_PRIMARY_MODEL || 'gemma2:2b';  // 2B = rápido (~3-5s)
-const FALLBACK_MODEL = process.env.OLLAMA_FALLBACK_MODEL || 'gemma2';    // 9B = fallback de calidad
+const PRIMARY_MODEL = process.env.OLLAMA_PRIMARY_MODEL || 'gemma2:2b';
+const FALLBACK_MODEL = process.env.OLLAMA_FALLBACK_MODEL || 'gemma2';
 
-// ─── SYSTEM PROMPT AMIS OFICIAL ───────────────────────────────────────────────
-const SYSTEM_PROMPT = `Eres un corrector ortográfico y de estilo para informes radiológicos en español.
+// ─── Árbitro Anatómico (System Prompt permanente) ─────────────────────────────
+const SYSTEM_PROMPT = `Eres el motor de corrección del sistema AMIS 2030, especializado en informes radiológicos en español chileno.
 
-REGLAS ESTRICTAS:
-1. SOLO corrige ortografía (tildes, errores de transcripción de voz) y puntuación (doble punto, comas faltantes).
-2. PRESERVA EXACTAMENTE los saltos de línea (\n) del texto original. Cada hallazgo debe permanecer en su propia línea.
-3. NO inventes contenido. Si una sección está vacía o dice "(vacío)", devuélvela como cadena vacía "".
-4. NO cambies el diagnóstico ni agregues hallazgos nuevos.
-5. NO fusiones líneas separadas en un solo párrafo.
-6. Usa terminología radiológica estándar en español.
-7. Responde SOLO con JSON válido, sin explicaciones.`;
+ÁRBITRO ANATÓMICO — Reglas de desambiguación (seseo y confusión B/V chilena):
 
-// ─── Warm-up: pre-carga del modelo al iniciar el servidor ─────────────────────
-// Esto mantiene Gemma 2 en memoria GPU (Metal) para respuestas <1s
+REGLA BAZO/VASO:
+- Si el texto menciona: páncreas, abdomen, hígado, hilio, esplénico, retroperitoneo, esplenomegalia, ascitis, porta, celíaco → "vaso" es "bazo" (órgano, B y Z).
+- Si el texto menciona: doppler, flujo, extremidades, carótida, fístula, arteria, vena, aorta, femoral, iliaco → "vaso" es "vaso" (conducto vascular, V y S).
+
+OTRAS REGLAS:
+- "bolsa" en contexto cardíaco → posiblemente "válvula"
+- "sesgo" en contexto cerebral → posiblemente "septo"
+- Prefijos sub-: subpleural, subcutáneo (nunca "sup-")
+- Abreviaturas intocables: TC, RM, RX, ECO, AP, PA, EVP, HTA, DM2, BIRADS, EPOC
+
+LIMPIEZA DE RUIDO DE DICTADO POR VOZ:
+- Elimina muletillas: "este...", "mmm", "o sea", "ya", "eh", "aah", "bueno entonces", "entonces..."
+- Elimina repeticiones accidentales: si una palabra o frase corta aparece dos veces seguidas, conserva solo una.
+- Ajusta puntuación clínica: listas de hallazgos terminan en punto. Frases largas sin punto deben cerrarse.
+- NO inventes hallazgos. NO cambies diagnósticos. NO fusiones líneas separadas.
+- Si una sección está vacía, devuélvela como cadena vacía "".
+- Responde SOLO con JSON válido sin explicaciones extra.`;
+
+// ─── Warm-up ──────────────────────────────────────────────────────────────────
 let modelWarmedUp = false;
 
 async function warmUpModel() {
   if (modelWarmedUp) return;
   try {
-    console.info(`[AMIS-Voice] 🔥 Pre-cargando modelo ${PRIMARY_MODEL} en GPU...`);
+    console.info(`[AMIS-Voice] 🔥 Pre-cargando ${PRIMARY_MODEL} en GPU...`);
     await fetch(`${OLLAMA_BASE}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,22 +49,21 @@ async function warmUpModel() {
         model: PRIMARY_MODEL,
         prompt: 'Hola',
         stream: false,
-        keep_alive: '30m',        // Mantener en VRAM por 30 minutos
+        keep_alive: '30m',
         options: { num_predict: 1, num_gpu: 99 },
       }),
-      signal: AbortSignal.timeout(60000), // El primer load puede tardar
+      signal: AbortSignal.timeout(60000),
     });
     modelWarmedUp = true;
-    console.info(`[AMIS-Voice] ✅ Modelo ${PRIMARY_MODEL} cargado en GPU Metal — listo para <1s`);
+    console.info(`[AMIS-Voice] ✅ ${PRIMARY_MODEL} cargado en GPU Metal`);
   } catch (e: any) {
-    console.warn(`[AMIS-Voice] ⚠️ Warm-up falló (Ollama podría no estar corriendo):`, e.message);
+    console.warn(`[AMIS-Voice] ⚠️ Warm-up falló:`, e.message);
   }
 }
 
-// Ejecutar warm-up automáticamente al importar el módulo
 warmUpModel();
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface SectionInput {
   technique: string;
   history: string;
@@ -63,25 +71,88 @@ interface SectionInput {
   impression: string;
 }
 
+interface DictionaryEntry {
+  id: string;
+  heard: string;
+  correct: string;
+  section?: string;
+  notes?: string;
+}
+
+// ─── Build user prompt with dictionary + context metadata ─────────────────────
+function buildUserPrompt(
+  sections: SectionInput,
+  metadata?: Record<string, string | undefined>,
+  dictionary?: DictionaryEntry[]
+): string {
+  const parts: string[] = [];
+
+  // Context header
+  const ctxParts: string[] = [];
+  if (metadata?.modality) ctxParts.push(`Modalidad: ${metadata.modality}`);
+  if (metadata?.studyDescription) ctxParts.push(`Examen: ${metadata.studyDescription}`);
+  if (metadata?.sex) ctxParts.push(`Sexo: ${metadata.sex}`);
+  if (metadata?.age) ctxParts.push(`Edad: ${metadata.age}`);
+  if (metadata?.activeSection) {
+    const labels: Record<string, string> = {
+      technique: 'Técnica de Estudio',
+      history: 'Antecedentes',
+      findings: 'Hallazgos',
+      impression: 'Impresión Diagnóstica',
+    };
+    ctxParts.push(`Campo activo: ${labels[metadata.activeSection] || metadata.activeSection}`);
+  }
+  if (ctxParts.length) parts.push(`[${ctxParts.join(' | ')}]`);
+
+  // Learning dictionary
+  if (dictionary && dictionary.length > 0) {
+    const lines = dictionary
+      .filter(e => !e.section || e.section === metadata?.activeSection)
+      .map(e => {
+        const note = e.notes ? ` (${e.notes})` : '';
+        return `  • "${e.heard}" → "${e.correct}"${note}`;
+      });
+
+    // Also include global entries (no section restriction)
+    const globalLines = dictionary
+      .filter(e => !e.section)
+      .map(e => {
+        const note = e.notes ? ` (${e.notes})` : '';
+        return `  • "${e.heard}" → "${e.correct}"${note}`;
+      });
+
+    const allLines = [...new Set([...lines, ...globalLines])];
+    if (allLines.length > 0) {
+      parts.push(
+        `DICCIONARIO DE CORRECCIÓN PERSONALIZADO (prioridad máxima — aplicar siempre):\n${allLines.join('\n')}`
+      );
+    }
+  }
+
+  parts.push(
+    `Corrige ortografía, puntuación y limpia ruido de voz. Usa el contexto anatómico para desambiguar.`,
+    `Devuelve SOLO JSON con claves: technique, history, findings, impression, changes (array de correcciones aplicadas).`,
+    ``,
+    `TÉCNICA: ${sections.technique || '(vacío)'}`,
+    ``,
+    `ANTECEDENTES: ${sections.history || '(vacío)'}`,
+    ``,
+    `HALLAZGOS:\n${sections.findings || '(vacío)'}`,
+    ``,
+    `IMPRESIÓN: ${sections.impression || '(vacío)'}`
+  );
+
+  return parts.join('\n');
+}
+
 // ─── Llamada a Ollama ─────────────────────────────────────────────────────────
 async function callOllama(
   model: string,
   sections: SectionInput,
-  metadata?: Record<string, string | undefined>
+  metadata?: Record<string, string | undefined>,
+  dictionary?: DictionaryEntry[]
 ): Promise<{ sections: SectionInput; changes: string[] }> {
-  const userPrompt = `Corrige SOLO ortografía y puntuación del siguiente informe. Preserva los saltos de línea. Responde en JSON con claves: technique, history, findings, impression, changes.
-Si una sección está vacía, devuelve "".
-
-${metadata?.modality ? `[Modalidad: ${metadata.modality}]` : ''}
-
-TÉCNICA: ${sections.technique || '(vacío)'}
-
-ANTECEDENTES: ${sections.history || '(vacío)'}
-
-HALLAZGOS:
-${sections.findings || '(vacío)'}
-
-IMPRESIÓN: ${sections.impression || '(vacío)'}`;
+  const userPrompt = buildUserPrompt(sections, metadata, dictionary);
 
   const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
     method: 'POST',
@@ -93,9 +164,9 @@ IMPRESIÓN: ${sections.impression || '(vacío)'}`;
       stream: false,
       keep_alive: '30m',
       options: {
-        temperature: 0.05,          // Muy baja = solo correcciones mínimas
+        temperature: 0.05,
         top_p: 0.85,
-        num_predict: 2048,          // Reducido — solo necesita corregir, no inventar
+        num_predict: 2048,
         num_gpu: 99,
         num_thread: 8,
       },
@@ -112,33 +183,24 @@ IMPRESIÓN: ${sections.impression || '(vacío)'}`;
   const data = await res.json();
   const responseText = data.response || '';
 
-  // Parsear JSON de la respuesta
-  try {
-    const parsed = JSON.parse(responseText);
+  const tryParse = (text: string) => {
+    const parsed = JSON.parse(text);
     return {
       sections: {
-        technique: parsed.technique || sections.technique,
-        history: parsed.history || sections.history,
-        findings: parsed.findings || sections.findings,
-        impression: parsed.impression || sections.impression,
+        technique:  parsed.technique  ?? sections.technique,
+        history:    parsed.history    ?? sections.history,
+        findings:   parsed.findings   ?? sections.findings,
+        impression: parsed.impression ?? sections.impression,
       },
-      changes: parsed.changes || [],
+      changes: Array.isArray(parsed.changes) ? parsed.changes : [],
     };
+  };
+
+  try {
+    return tryParse(responseText);
   } catch {
-    // Fallback: extraer JSON incrustado en texto
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        sections: {
-          technique: parsed.technique || sections.technique,
-          history: parsed.history || sections.history,
-          findings: parsed.findings || sections.findings,
-          impression: parsed.impression || sections.impression,
-        },
-        changes: parsed.changes || [],
-      };
-    }
+    if (jsonMatch) return tryParse(jsonMatch[0]);
     throw new Error('Ollama no devolvió JSON válido');
   }
 }
@@ -146,27 +208,25 @@ IMPRESIÓN: ${sections.impression || '(vacío)'}`;
 // ─── POST: Refinar informe ────────────────────────────────────────────────────
 export async function POST(request: Request) {
   try {
-    const { sections, metadata } = await request.json();
+    const { sections, metadata, dictionary } = await request.json();
 
     if (!sections) {
       return NextResponse.json({ error: 'Missing sections' }, { status: 400 });
     }
 
-    // Re-warm si el modelo se enfrió
     if (!modelWarmedUp) warmUpModel();
 
     let result;
     let usedModel = PRIMARY_MODEL;
 
     try {
-      result = await callOllama(PRIMARY_MODEL, sections, metadata);
+      result = await callOllama(PRIMARY_MODEL, sections, metadata, dictionary);
     } catch (primaryError: any) {
       console.warn(`[AMIS-Voice] Modelo primario ${PRIMARY_MODEL} falló:`, primaryError.message);
-      console.info(`[AMIS-Voice] Intentando fallback: ${FALLBACK_MODEL}`);
       usedModel = FALLBACK_MODEL;
 
       try {
-        result = await callOllama(FALLBACK_MODEL, sections, metadata);
+        result = await callOllama(FALLBACK_MODEL, sections, metadata, dictionary);
       } catch (fallbackError: any) {
         console.error(`[AMIS-Voice] Fallback ${FALLBACK_MODEL} también falló:`, fallbackError.message);
         return NextResponse.json({
@@ -190,7 +250,7 @@ export async function POST(request: Request) {
   }
 }
 
-// ─── OPTIONS: Health check + lista de modelos ─────────────────────────────────
+// ─── OPTIONS: Health check ────────────────────────────────────────────────────
 export async function OPTIONS() {
   try {
     const res = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(3000) });

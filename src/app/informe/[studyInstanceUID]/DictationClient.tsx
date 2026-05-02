@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { 
@@ -9,7 +9,7 @@ import {
   Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Clock, Stethoscope,
   Plus, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Loader2,
   LayoutGrid, List, ExternalLink, Layout, Minimize2, Eye, Printer, ClipboardList,
-  Wand2, Cpu, Zap, Brain
+  Wand2, Cpu, Zap, Brain, BookOpen
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabase';
@@ -33,7 +33,10 @@ import { useInvoxDictation, type InvoxState } from '@/hooks/useInvoxDictation';
 import { useCentralDictation, type DictationState, type ServerStatus } from '@/hooks/useCentralDictation';
 import { useTextBridge } from '@/hooks/useTextBridge';
 import FloatingAIMenu from '@/components/dictation/FloatingAIMenu';
-import SnippetsPanel, { processSnippetCommand } from '@/components/dictation/SnippetsPanel';
+import SnippetsPanel, { processSnippetCommand, DEFAULT_SNIPPETS } from '@/components/dictation/SnippetsPanel';
+import SlashCommandMenu from '@/components/dictation/SlashCommandMenu';
+import LearningDictionaryPanel, { getDictionary } from '@/components/dictation/LearningDictionaryPanel';
+import type { Snippet } from '@/components/dictation/SnippetsPanel';
 import { useOllamaRefine, type RefineState, type OllamaStatus } from '@/hooks/useOllamaRefine';
 import { StudyFile } from '@/lib/server/services/legacyRisService';
 
@@ -160,35 +163,23 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
     }
   }, [bridgeMobileConnected, showRemoteQR]);
 
-  // Cuando el móvil envía texto nuevo → calcular DELTA e insertar solo lo nuevo
+  // Cuando el movil envia texto nuevo via Text-Bridge:
+  // REEMPLAZA el contenido completo de la seccion activa con el texto del movil.
+  // El movil SIEMPRE envia el estado completo de su textarea (no incremental),
+  // por lo que concatenar causaria duplicacion. Se usa reemplazo directo.
   useEffect(() => {
     if (!bridgeMobileText || bridgeMobileText === prevBridgeTextRef.current) return;
-    
-    const prev = prevBridgeTextRef.current;
-    const fullText = bridgeMobileText;
-    prevBridgeTextRef.current = fullText;
+    prevBridgeTextRef.current = bridgeMobileText;
 
-    // Calcular DELTA: solo lo que es NUEVO respecto al envío anterior
-    // El celular siempre envía el textarea completo (acumulativo),
-    // así que el delta es lo que sobra después del texto anterior
-    let delta = fullText;
-    if (prev && fullText.startsWith(prev)) {
-      delta = fullText.substring(prev.length);
-    }
+    const cleanText = bridgeMobileText.trim();
+    if (!cleanText) return;
 
-    const cleanDelta = delta.replace(/^[ \t]+|[ \t]+$/g, '');
-    if (!cleanDelta) return; // Sin texto nuevo, no insertar nada
+    setSections(prev => ({
+      ...prev,
+      [activeSection]: cleanText,
+    }));
 
-    const separator = /^[\n.,;:!?)]/.test(cleanDelta) ? '' : ' ';
-
-    // Agregar solo el DELTA al final de la sección activa
-    setSections(prevSections => {
-      const current = prevSections[activeSection];
-      const prefix = current.trim() ? separator : '';
-      return { ...prevSections, [activeSection]: current + prefix + cleanDelta };
-    });
-
-    console.info(`[Text-Bridge] ✅ Delta insertado en ${activeSection}: "${cleanDelta.substring(0, 60)}"`);
+    console.info(`[Text-Bridge] Reemplazo en "${activeSection}": ${cleanText.length} chars`);
   }, [bridgeMobileText, activeSection]);
   const [remoteToken, setRemoteToken] = useState<string>('');
   
@@ -270,7 +261,83 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
 
   const [showTemplates, setShowTemplates] = useState(false);
   const [showSnippets, setShowSnippets] = useState(false);
+  const [showDictionary, setShowDictionary] = useState(false);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── SLASH COMMAND STATE (/snippet fuzzy menu) ──────────────────────────────
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashStart, setSlashStart] = useState(0);
+  const [slashSection, setSlashSection] = useState<'technique' | 'history' | 'findings' | 'impression'>('findings');
+  const [slashAnchorRect, setSlashAnchorRect] = useState<DOMRect | undefined>();
+
+  /** Mapea campo del informe → categorías de snippets relevantes */
+  const SECTION_CATEGORIES: Record<string, string[]> = {
+    technique: ['Técnicas', 'Favoritos'],
+    history:   ['Antecedentes', 'Favoritos'],
+    findings:  ['Hallazgos Normales', 'Hallazgos Comunes', 'Favoritos'],
+    impression:['Impresiones', 'Favoritos'],
+  };
+
+  /** Etiqueta legible del campo activo para el menú */
+  const SECTION_LABELS: Record<string, string> = {
+    technique:  'Técnica de Estudio',
+    history:    'Antecedentes',
+    findings:   'Hallazgos',
+    impression: 'Impresión Diagnóstica',
+  };
+
+  const allSnippets = useMemo<Snippet[]>(() => {
+    const custom: Snippet[] = (() => {
+      if (typeof window === 'undefined') return [];
+      try { return JSON.parse(localStorage.getItem('amis_custom_snippets') || '[]'); } catch { return []; }
+    })();
+    return [...DEFAULT_SNIPPETS, ...custom];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** onChange para los 4 textareas — detecta el comando '/' y activa el menú */
+  const handleSectionChange = useCallback((
+    section: 'technique' | 'history' | 'findings' | 'impression',
+    e: React.ChangeEvent<HTMLTextAreaElement>
+  ) => {
+    const val = e.target.value;
+    const cursor = e.target.selectionStart ?? val.length;
+    const beforeCursor = val.substring(0, cursor);
+    const slashMatch = beforeCursor.match(/\/([\w]*)$/);
+    setSections(prev => ({ ...prev, [section]: val }));
+    if (slashMatch) {
+      setSlashQuery(slashMatch[1]);
+      setSlashStart(cursor - slashMatch[0].length);
+      setSlashSection(section);
+      setSlashAnchorRect(e.target.getBoundingClientRect());
+      setSlashOpen(true);
+    } else {
+      setSlashOpen(false);
+    }
+  }, []);
+
+  /** Cuando se selecciona un snippet del menú slash → reemplaza /query con el texto */
+  const handleSlashSelect = useCallback((snippet: Snippet) => {
+    setSections(prev => {
+      const ref = sectionRefs[slashSection]?.current;
+      const current = prev[slashSection];
+      const cursorPos = ref?.selectionStart ?? current.length;
+      const before = current.substring(0, slashStart);
+      const after = current.substring(cursorPos);
+      const newText = before + snippet.text + after;
+      // Move cursor after inserted text
+      setTimeout(() => {
+        if (ref) {
+          ref.focus();
+          const pos = slashStart + snippet.text.length;
+          ref.setSelectionRange(pos, pos);
+        }
+      }, 0);
+      return { ...prev, [slashSection]: newText };
+    });
+    setSlashOpen(false);
+  }, [slashSection, slashStart, sectionRefs]);
   const [activeAttachment, setActiveAttachment] = useState<StudyFile | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -454,14 +521,16 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       studyDescription: study.studyDescription,
       sex: study.sex,
       age: study.age,
+      activeSection,                   // Contexto del campo activo
+      dictionary: getDictionary(),     // Diccionario de aprendizaje del médico
     });
     if (result) {
       setSections(result.sections);
       setBaseSections(result.sections);
       setIsTextRefined(true);
-      setHighlightColor('text-slate-300'); // Cambiar a Negro/Humo (validado)
+      setHighlightColor('text-slate-300');
     }
-  }, [sections, ollamaRefine, study.modality, study.studyDescription, study.sex, study.age]);
+  }, [sections, ollamaRefine, study.modality, study.studyDescription, study.sex, study.age, activeSection]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // REALTIME ANTENNA (SUPABASE)
@@ -715,10 +784,8 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   // Keyboard shortcut F2 para grabar
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        toggleRecording();
-      }
+      // F2 desactivado: el audio local fue reemplazado por el Text-Bridge movil.
+      // if (e.key === 'F2') { e.preventDefault(); toggleRecording(); }
       // F3 — Toggle Dictado Central (Servidor AMIS Voice)
       if (e.key === 'F3') {
         e.preventDefault();
@@ -1482,6 +1549,21 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                    <ClipboardList size={12} />
                    <span className="hidden lg:inline">Snippets</span>
                  </button>
+
+                  {/* Botón Diccionario de Aprendizaje */}
+                  <button
+                    id="btn-dictionary"
+                    onClick={() => setShowDictionary(!showDictionary)}
+                    title="📖 Diccionario de Aprendizaje"
+                    className={`flex items-center gap-1.5 px-2.5 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all duration-150 border select-none ${
+                      showDictionary
+                        ? 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+                        : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <BookOpen size={12} />
+                    <span className="hidden lg:inline">Diccionario</span>
+                  </button>
              </div>
              </div>
 
@@ -1647,20 +1729,26 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                        TÉCNICA DE ESTUDIO
                        {activeSection === 'technique' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <div className="relative w-full h-auto min-h-[60px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
-                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                    <div
+                      className="relative text-[18px] leading-[1.7] font-medium font-sans tracking-wide"
+                      style={{ display: 'grid' }}
+                    >
+                      <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '60px', wordBreak: 'break-words' }}>
+                        {sections.technique}{' '}
+                      </div>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.technique, sections.technique)}     
                       </div>
                       <textarea
                          ref={sectionRefs.technique}
                          value={sections.technique}
-                         onChange={e => setSections(p => ({...p, technique: e.target.value}))}
+                         onChange={e => handleSectionChange('technique', e)}
                          onFocus={() => setActiveSection('technique')}
                          spellCheck={true}
                          lang="es"
-                         className="relative w-full h-full min-h-[60px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         className="bg-transparent outline-none resize-none p-0 text-transparent caret-white overflow-hidden"
                          placeholder="Describa la técnica..."
-                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                         style={{ gridArea: '1 / 1', minHeight: '60px', color: 'transparent', WebkitTextFillColor: 'transparent', wordBreak: 'break-words' }}
                       />
                     </div>
                   </div>
@@ -1670,20 +1758,26 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                        ANTECEDENTES
                        {activeSection === 'history' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <div className="relative w-full h-auto min-h-[60px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
-                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                    <div
+                      className="relative text-[18px] leading-[1.7] font-medium font-sans tracking-wide"
+                      style={{ display: 'grid' }}
+                    >
+                      <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '60px', wordBreak: 'break-words' }}>
+                        {sections.history}{' '}
+                      </div>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.history, sections.history)}
                       </div>
                       <textarea
                          ref={sectionRefs.history}
                          value={sections.history}
-                         onChange={e => setSections(p => ({...p, history: e.target.value}))}
+                         onChange={e => handleSectionChange('history', e)}
                          onFocus={() => setActiveSection('history')}
                          spellCheck={true}
                          lang="es"
-                         className="relative w-full h-full min-h-[60px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         className="bg-transparent outline-none resize-none p-0 text-transparent caret-white overflow-hidden"
                          placeholder="Indique antecedentes relevantes..."
-                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                         style={{ gridArea: '1 / 1', minHeight: '60px', color: 'transparent', WebkitTextFillColor: 'transparent', wordBreak: 'break-words' }}
                       />
                     </div>
                   </div>
@@ -1693,21 +1787,27 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                        HALLAZGOS
                        {activeSection === 'findings' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <div className="relative w-full min-h-[160px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
-                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                    <div
+                      className="relative text-[18px] leading-[1.7] font-medium font-sans tracking-wide"
+                      style={{ display: 'grid' }}
+                    >
+                      <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '160px', wordBreak: 'break-words' }}>
+                        {sections.findings}{' '}
+                      </div>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
                         {renderDiff(baseSections.findings, sections.findings)}
                       </div>
                       <textarea
                          autoFocus
                          ref={sectionRefs.findings}
                          value={sections.findings}
-                         onChange={e => setSections(p => ({...p, findings: e.target.value}))}
+                         onChange={e => handleSectionChange('findings', e)}
                          onFocus={() => setActiveSection('findings')}
                          spellCheck={true}
                          lang="es"
-                         className="relative w-full h-full min-h-[160px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         className="bg-transparent outline-none resize-none p-0 text-transparent caret-white overflow-hidden"
                          placeholder="Describa los hallazgos principales..."
-                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                         style={{ gridArea: '1 / 1', minHeight: '160px', color: 'transparent', WebkitTextFillColor: 'transparent', wordBreak: 'break-words' }}
                       />
                     </div>
                   </div>
@@ -1717,20 +1817,26 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                        IMPRESIÓN DIAGNÓSTICA
                        {activeSection === 'impression' && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
                     </span>
-                    <div className="relative w-full min-h-[120px] text-[18px] leading-[1.7] font-medium font-sans tracking-wide">
-                      <div className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words">
+                    <div
+                      className="relative text-[18px] leading-[1.7] font-medium font-sans tracking-wide"
+                      style={{ display: 'grid' }}
+                    >
+                      <div aria-hidden className="invisible pointer-events-none whitespace-pre-wrap break-words" style={{ gridArea: '1 / 1', minHeight: '120px', wordBreak: 'break-words' }}>
+                        {sections.impression}{' '}
+                      </div>
+                      <div className="pointer-events-none whitespace-pre-wrap break-words" style={{ position: 'absolute', inset: 0, wordBreak: 'break-words' }}>
                          {renderDiff(baseSections.impression, sections.impression)}
                       </div>
                       <textarea
                          ref={sectionRefs.impression}
                          value={sections.impression}
-                         onChange={e => setSections(p => ({...p, impression: e.target.value}))}
+                         onChange={e => handleSectionChange('impression', e)}
                          onFocus={() => setActiveSection('impression')}
                          spellCheck={true}
                          lang="es"
-                         className="relative w-full h-full min-h-[120px] bg-transparent outline-none resize-none p-0 text-transparent caret-white"
+                         className="bg-transparent outline-none resize-none p-0 text-transparent caret-white overflow-hidden"
                          placeholder="Conclusión del estudio..."
-                         style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+                         style={{ gridArea: '1 / 1', minHeight: '120px', color: 'transparent', WebkitTextFillColor: 'transparent', wordBreak: 'break-words' }}
                       />
                     </div>
                   </div>
@@ -2654,6 +2760,19 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         }}
       />
 
+      {/* ─── Slash Command Menu (/ en cualquier sección) ─── */}
+      {slashOpen && (
+        <SlashCommandMenu
+          query={slashQuery}
+          snippets={allSnippets}
+          onSelect={handleSlashSelect}
+          onClose={() => setSlashOpen(false)}
+          anchorRect={slashAnchorRect}
+          sectionCategories={SECTION_CATEGORIES[slashSection]}
+          sectionLabel={SECTION_LABELS[slashSection]}
+        />
+      )}
+
       {/* ─── Suite de Productividad: Panel de Snippets ─── */}
       <SnippetsPanel
         isOpen={showSnippets}
@@ -2678,6 +2797,12 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
           }
           setShowSnippets(false);
         }}
+      />
+
+      {/* ─── Panel Diccionario de Aprendizaje ─── */}
+      <LearningDictionaryPanel
+        isOpen={showDictionary}
+        onClose={() => setShowDictionary(false)}
       />
 
     </motion.div>

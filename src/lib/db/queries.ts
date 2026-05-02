@@ -94,15 +94,62 @@ export async function getWorklist(
   pagination: PaginationParams = { page: 1, pageSize: 50 },
   filters: WorklistFilters = {}
 ): Promise<PaginatedResult<Study>> {
-  // Sanitización ultra-robusta para evitar NaN en MSSQL
+  // Sanitizacion para evitar NaN en MSSQL
   const pSize = parseInt(String(pagination?.pageSize));
   const pPage = parseInt(String(pagination?.page));
-  
   const safePageSize = isNaN(pSize) ? 50 : Math.max(1, pSize);
   const safePage = isNaN(pPage) ? 1 : Math.max(1, pPage);
   const offset = (safePage - 1) * safePageSize;
 
-  // Lógica de Rango de Tiempo (Default: Hoy)
+  // ===================================================================
+  // RAMA: BUSQUEDA GLOBAL HISTORICA
+  // Cuando q esta presente, anula TODOS los filtros de fecha y busca
+  // en toda la base de datos (historial completo de todos los anos).
+  // ===================================================================
+  if (filters.q && filters.q.trim().length >= 2) {
+    const raw = filters.q.trim();
+    const searchLike = `%${raw}%`;
+    const startLike  = `${raw}%`;
+
+    const countResult = await prisma.$queryRaw<{ total: number }[]>`
+      SELECT COUNT(*) AS total FROM View_Busqueda_Examen
+      WHERE (
+        nombre          LIKE ${searchLike}
+        OR apellidopaterno LIKE ${searchLike}
+        OR apellidomaterno LIKE ${searchLike}
+        OR idpaciente      LIKE ${startLike}
+        OR numeroacceso    LIKE ${startLike}
+      )
+    `;
+    const searchTotal = Number(countResult[0]?.total ?? 0);
+
+    const searchRows = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      SELECT *
+      FROM View_Busqueda_Examen
+      WHERE (
+        nombre          LIKE ${searchLike}
+        OR apellidopaterno LIKE ${searchLike}
+        OR apellidomaterno LIKE ${searchLike}
+        OR idpaciente      LIKE ${startLike}
+        OR numeroacceso    LIKE ${startLike}
+      )
+      ORDER BY fechaexamen DESC
+      OFFSET ${Prisma.raw(String(offset))} ROWS
+      FETCH NEXT ${Prisma.raw(String(safePageSize))} ROWS ONLY
+    `);
+
+    return {
+      data: searchRows.map(mapRowToStudy),
+      page: safePage,
+      pageSize: safePageSize,
+      total: searchTotal,
+      totalPages: Math.ceil(searchTotal / safePageSize),
+    };
+  }
+
+  // ===================================================================
+  // RAMA: WORKLIST CON FILTRO DE FECHA (comportamiento normal)
+  // ===================================================================
   const timeRange = filters.timeRange || 'today';
   let dateFilter: Prisma.Sql = Prisma.sql`1=1`;
 
@@ -112,7 +159,6 @@ export async function getWorklist(
     dateFilter = Prisma.sql`fechaexamen >= DATEADD(hour, -24, GETDATE())`;
   }
 
-  // Construir fragmentos SQL dinámicos
   const conditions: Prisma.Sql[] = [dateFilter];
 
   if (filters.examStatusId !== undefined) {
@@ -136,13 +182,11 @@ export async function getWorklist(
 
   const whereClause = Prisma.join(conditions, " AND ");
 
-  // Count total
   const countResult = await prisma.$queryRaw<{ total: number }[]>`
     SELECT COUNT(*) AS total FROM View_Busqueda_Examen WHERE ${whereClause}
   `;
   const total = Number(countResult[0]?.total ?? 0);
 
-  // Fetch page — OFFSET/FETCH requiere SQL crudo para inyectar números directamente (MSSQL no los acepta como @P0)
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     SELECT *
     FROM View_Busqueda_Examen
@@ -158,6 +202,51 @@ export async function getWorklist(
     pageSize: safePageSize,
     total,
     totalPages: Math.ceil(total / safePageSize),
+  };
+}
+
+/**
+ * getWorklistStats -- Conteos de estado para las tarjetas KPI del Panel de Trabajo
+ *
+ * Ejecuta UNA sola query con COUNT condicional para obtener todos los KPIs
+ * sin cargar registros completos. Extremadamente eficiente en produccion.
+ */
+export async function getWorklistStats(
+  timeRange: 'today' | '24h' | 'all' = 'today'
+): Promise<{ pending: number; informed: number; validated: number; urgent: number; total: number }> {
+  let dateFilter: Prisma.Sql = Prisma.sql`1=1`;
+  if (timeRange === 'today') {
+    dateFilter = Prisma.sql`fechaexamen >= CAST(GETDATE() AS DATE)`;
+  } else if (timeRange === '24h') {
+    dateFilter = Prisma.sql`fechaexamen >= DATEADD(hour, -24, GETDATE())`;
+  }
+
+  type StatsRow = {
+    pending_count: number | bigint;
+    informed_count: number | bigint;
+    validated_count: number | bigint;
+    urgent_count: number | bigint;
+    total_count: number | bigint;
+  };
+
+  const result = await prisma.$queryRaw<StatsRow[]>`
+    SELECT
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%pend%' THEN 1 END) AS pending_count,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%inform%' THEN 1 END) AS informed_count,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%valid%' THEN 1 END) AS validated_count,
+      COUNT(CASE WHEN LOWER(nombre_tipo_urgencia) LIKE '%urg%' THEN 1 END) AS urgent_count,
+      COUNT(*) AS total_count
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter}
+  `;
+
+  const row = result[0];
+  return {
+    pending:  Number(row?.pending_count  ?? 0),
+    informed: Number(row?.informed_count ?? 0),
+    validated: Number(row?.validated_count ?? 0),
+    urgent:   Number(row?.urgent_count   ?? 0),
+    total:    Number(row?.total_count    ?? 0),
   };
 }
 
@@ -325,11 +414,238 @@ export async function getInstitutions() {
 }
 
 /**
- * getModalities — Catálogo de modalidades activas
+ * getModalities — Catalogo de modalidades activas
  */
 export async function getModalities() {
   return (prisma as any).modalidad.findMany({
     where: { estado: 1 },
     orderBy: { nombre: "asc" },
   });
+}
+
+// =====================================================================
+// ESTADISTICAS DE PRODUCCION Y RENDIMIENTO
+// =====================================================================
+
+export interface StatisticsFilters {
+  period: 'today' | 'week' | 'month' | 'custom';
+  dateFrom?: string;  // ISO date string YYYY-MM-DD
+  dateTo?: string;
+  modality?: string;
+  institutionId?: number;
+  radiologistUsername?: string;
+}
+
+export interface DayStudyRow {
+  study_date: string;
+  total: number;
+  informed: number;
+  pending: number;
+}
+
+export interface ModalityRow {
+  modality: string;
+  total: number;
+  informed: number;
+}
+
+export interface InstitutionRow {
+  institution_name: string;
+  total: number;
+  informed: number;
+}
+
+export interface SLASummaryRow {
+  on_time: number;
+  overdue: number;
+  total: number;
+}
+
+export interface StatsSummaryRow {
+  total: number;
+  informed: number;
+  pending: number;
+  urgent: number;
+  validated: number;
+}
+
+export interface StatisticsData {
+  summary: StatsSummaryRow;
+  byDay: DayStudyRow[];
+  byModality: ModalityRow[];
+  byInstitution: InstitutionRow[];
+  sla: SLASummaryRow;
+}
+
+/**
+ * Construye el filtro de fecha para las queries de estadisticas.
+ * Soporta: today, week, month, custom (dateFrom/dateTo).
+ */
+function buildStatsDateFilter(filters: StatisticsFilters): Prisma.Sql {
+  if (filters.period === 'today') {
+    return Prisma.sql`fechaexamen >= CAST(GETDATE() AS DATE)`;
+  }
+  if (filters.period === 'week') {
+    return Prisma.sql`fechaexamen >= DATEADD(day, -7, CAST(GETDATE() AS DATE))`;
+  }
+  if (filters.period === 'month') {
+    return Prisma.sql`fechaexamen >= CAST(DATEADD(day, 1-DAY(GETDATE()), CAST(GETDATE() AS DATE)) AS DATE)`;
+  }
+  if (filters.period === 'custom' && filters.dateFrom && filters.dateTo) {
+    return Prisma.sql`fechaexamen >= ${filters.dateFrom} AND fechaexamen <= DATEADD(day, 1, CAST(${filters.dateTo} AS DATE))`;
+  }
+  // Fallback: mes actual
+  return Prisma.sql`fechaexamen >= CAST(DATEADD(day, 1-DAY(GETDATE()), CAST(GETDATE() AS DATE)) AS DATE)`;
+}
+
+/**
+ * getStatisticsData — Dashboard de estadisticas de produccion y rendimiento.
+ *
+ * Ejecuta 4 queries en paralelo:
+ * 1. Resumen KPI (total, informados, pendientes, urgentes)
+ * 2. Estudios por dia (para grafico de barras)
+ * 3. Estudios por modalidad (para grafico de barras horizontales)
+ * 4. Cumplimiento SLA aproximado (estudios en tiempo vs. vencidos)
+ */
+export async function getStatisticsData(
+  filters: StatisticsFilters
+): Promise<StatisticsData> {
+  const dateFilter = buildStatsDateFilter(filters);
+
+  // Condiciones adicionales (modalidad, institucion, radiologo)
+  const extraConditions: Prisma.Sql[] = [];
+  if (filters.modality) {
+    extraConditions.push(Prisma.sql`modalidad = ${filters.modality}`);
+  }
+  if (filters.institutionId) {
+    extraConditions.push(Prisma.sql`id_institucion = ${filters.institutionId}`);
+  }
+  if (filters.radiologistUsername) {
+    extraConditions.push(Prisma.sql`usernameRadiologo = ${filters.radiologistUsername}`);
+  }
+
+  const extraWhere = extraConditions.length > 0
+    ? Prisma.sql` AND ${Prisma.join(extraConditions, ' AND ')}`
+    : Prisma.sql``;
+
+  // ── 1. Resumen KPI ──────────────────────────────────────────────
+  const summaryQuery = prisma.$queryRaw<StatsSummaryRow[]>`
+    SELECT
+      COUNT(*)                                                             AS total,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%inform%'
+                   OR LOWER(nombre_estado_examen) LIKE '%valid%'  THEN 1 END) AS informed,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%pend%'   THEN 1 END) AS pending,
+      COUNT(CASE WHEN LOWER(nombre_tipo_urgencia) LIKE '%urg%'    THEN 1 END) AS urgent,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%valid%'  THEN 1 END) AS validated
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter} ${extraWhere}
+  `;
+
+  // ── 2. Estudios por dia (ultimos 31 dias maximo) ─────────────────
+  const byDayQuery = prisma.$queryRaw<Array<Record<string, unknown>>>`
+    SELECT
+      CAST(fechaexamen AS DATE)                                            AS study_date,
+      COUNT(*)                                                             AS total,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%inform%'
+                   OR LOWER(nombre_estado_examen) LIKE '%valid%'  THEN 1 END) AS informed,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%pend%'   THEN 1 END) AS pending
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter} ${extraWhere}
+    GROUP BY CAST(fechaexamen AS DATE)
+    ORDER BY study_date ASC
+  `;
+
+  // ── 3. Estudios por modalidad ────────────────────────────────────
+  const byModalityQuery = prisma.$queryRaw<Array<Record<string, unknown>>>`
+    SELECT
+      modalidad                                                            AS modality,
+      COUNT(*)                                                             AS total,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%inform%'
+                   OR LOWER(nombre_estado_examen) LIKE '%valid%'  THEN 1 END) AS informed
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter} ${extraWhere}
+    GROUP BY modalidad
+    ORDER BY total DESC
+  `;
+
+  // ── 4. Estudios por institucion ──────────────────────────────────
+  const byInstitutionQuery = prisma.$queryRaw<Array<Record<string, unknown>>>`
+    SELECT
+      ISNULL(institucion, 'Sin Institucion')                               AS institution_name,
+      COUNT(*)                                                             AS total,
+      COUNT(CASE WHEN LOWER(nombre_estado_examen) LIKE '%inform%'
+                   OR LOWER(nombre_estado_examen) LIKE '%valid%'  THEN 1 END) AS informed
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter} ${extraWhere}
+    GROUP BY institucion
+    ORDER BY total DESC
+  `;
+
+  // ── 5. Cumplimiento SLA (aproximacion por tiempo transcurrido) ───
+  // SLA aproximado: URGENCIA = 60 min, NORMAL = 240 min, CRITICO = 30 min
+  // Compara fechaexamen con fechavalidacion (o GETDATE() si no esta validado)
+  const slaQuery = prisma.$queryRaw<SLASummaryRow[]>`
+    SELECT
+      COUNT(CASE WHEN
+        (LOWER(nombre_tipo_urgencia) LIKE '%critic%' AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) <= 30)
+        OR (LOWER(nombre_tipo_urgencia) LIKE '%urg%'
+            AND LOWER(nombre_tipo_urgencia) NOT LIKE '%critic%'
+            AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) <= 60)
+        OR (LOWER(nombre_tipo_urgencia) NOT LIKE '%urg%'
+            AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) <= 240)
+      THEN 1 END) AS on_time,
+      COUNT(CASE WHEN
+        (LOWER(nombre_tipo_urgencia) LIKE '%critic%' AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) > 30)
+        OR (LOWER(nombre_tipo_urgencia) LIKE '%urg%'
+            AND LOWER(nombre_tipo_urgencia) NOT LIKE '%critic%'
+            AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) > 60)
+        OR (LOWER(nombre_tipo_urgencia) NOT LIKE '%urg%'
+            AND DATEDIFF(minute, fechaexamen, ISNULL(fechavalidacion, GETDATE())) > 240)
+      THEN 1 END) AS overdue,
+      COUNT(*) AS total
+    FROM View_Busqueda_Examen
+    WHERE ${dateFilter} ${extraWhere}
+  `;
+
+  // Ejecutar todo en paralelo
+  const [summaryRows, dayRows, modalityRows, institutionRows, slaRows] = await Promise.all([
+    summaryQuery,
+    byDayQuery,
+    byModalityQuery,
+    byInstitutionQuery,
+    slaQuery,
+  ]);
+
+  const summary = summaryRows[0] ?? { total: 0, informed: 0, pending: 0, urgent: 0, validated: 0 };
+
+  return {
+    summary: {
+      total:     Number(summary.total     ?? 0),
+      informed:  Number(summary.informed  ?? 0),
+      pending:   Number(summary.pending   ?? 0),
+      urgent:    Number(summary.urgent    ?? 0),
+      validated: Number(summary.validated ?? 0),
+    },
+    byDay: dayRows.map((r) => ({
+      study_date: String(r.study_date ?? '').split('T')[0],
+      total:      Number(r.total     ?? 0),
+      informed:   Number(r.informed  ?? 0),
+      pending:    Number(r.pending   ?? 0),
+    })),
+    byModality: modalityRows.map((r) => ({
+      modality: String(r.modality ?? 'Desconocida'),
+      total:    Number(r.total    ?? 0),
+      informed: Number(r.informed ?? 0),
+    })),
+    byInstitution: institutionRows.map((r) => ({
+      institution_name: String(r.institution_name ?? 'Sin Centro'),
+      total:            Number(r.total            ?? 0),
+      informed:         Number(r.informed         ?? 0),
+    })),
+    sla: {
+      on_time: Number(slaRows[0]?.on_time ?? 0),
+      overdue: Number(slaRows[0]?.overdue ?? 0),
+      total:   Number(slaRows[0]?.total   ?? 0),
+    },
+  };
 }
