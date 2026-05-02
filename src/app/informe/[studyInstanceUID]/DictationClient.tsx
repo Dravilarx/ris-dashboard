@@ -9,7 +9,7 @@ import {
   Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Clock, Stethoscope,
   Plus, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Loader2,
   LayoutGrid, List, ExternalLink, Layout, Minimize2, Eye, Printer, ClipboardList,
-  Wand2, Cpu, Zap, Brain, BookOpen
+  Wand2, Cpu, Zap, Brain, BookOpen, GraduationCap
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabase';
@@ -96,7 +96,43 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [showValidationModal, setShowValidationModal] = useState(false);
   const [validationAction, setValidationAction] = useState<'inform' | 'validate' | null>(null);
   const [guardiaIAUsed, setGuardiaIAUsed] = useState(false); // pre-check si ya usó Guardia IA
-  
+
+  // ── MÓDULO DOCENTE — SESHAT ────────────────────────────────────────────────
+  // Persistencia por estudio: localStorage key = seshat_marked_<studyUID>
+  const seshatStorageKey = `seshat_marked_${study?.studyInstanceUID || study?.accessionNumber || 'unknown'}`;
+  const [isMarkedSeshat, setIsMarkedSeshat] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(seshatStorageKey) === 'true';
+  });
+  const [seshatToast, setSeshatToast] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+
+  const sendToSeshat = async () => {
+    if (!study) return;
+    setSeshatToast('sending');
+    try {
+      const { error } = await supabase.from('educational_resources').insert({
+        age: study.age,
+        sex: study.sex,
+        modality: study.modality,
+        description: study.studyDescription,
+        target_collection: 'seshat_docencia',
+        anonymized: true,
+        origin_uid: study.studyInstanceUID || study.accessionNumber,
+        marked_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      setIsMarkedSeshat(true);
+      localStorage.setItem(seshatStorageKey, 'true');
+      setSeshatToast('done');
+    } catch (err) {
+      console.error('[Seshat] Error al enviar:', err);
+      setSeshatToast('error');
+    } finally {
+      setTimeout(() => setSeshatToast('idle'), 4000);
+    }
+  };
+
+
   // ─── HISTORIAL PREVIO — SEMÁFORO DE ACCESO ─────────────────────────────────
   // Gris  = sin historial detectado
   // Azul  = historial disponible, cargando/pendiente de verificación IRAD
@@ -1988,7 +2024,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
             {/* Panel de Decisiones (Footer) — Rediseño AMIS 2030 */}
             <div className="bg-[#050810] border-t border-white/5 px-5 py-3 flex items-center justify-between shrink-0 relative z-20 gap-4">
 
-              {/* Izquierda: Auto-guardado + indicador crítico */}
+              {/* Izquierda: Auto-guardado + indicador crítico + Seshat toast */}
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">
                   {lastSaved ? `Guardado a las ${lastSaved.toLocaleTimeString()}` : 'Borrador sin cambios'}
@@ -1999,6 +2035,26 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     {criticalPathology && ` — ${criticalPathology}`}
                   </span>
                 )}
+                {/* Seshat feedback toast */}
+                <AnimatePresence>
+                  {seshatToast !== 'idle' && (
+                    <motion.span
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
+                        seshatToast === 'sending' ? 'bg-emerald-500/8 border-emerald-500/20 text-emerald-400' :
+                        seshatToast === 'done'    ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300' :
+                                                   'bg-red-500/15 border-red-500/30 text-red-400'
+                      }`}
+                    >
+                      {seshatToast === 'sending' && <Loader2 size={10} className="animate-spin" />}
+                      {seshatToast === 'sending' && 'Enviando a Seshat...'}
+                      {seshatToast === 'done'    && <><GraduationCap size={10} /> Caso enviado a Seshat para anonimización y docencia</>}
+                      {seshatToast === 'error'   && 'Error al conectar con Seshat'}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Derecha: Utilidades + Acciones Principales */}
@@ -2018,6 +2074,24 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-rose-400 bg-rose-500/8 hover:bg-rose-500/15 border border-rose-500/20 transition-all"
                   >
                     <AlertCircle size={12} /> B2B
+                  </button>
+
+                  {/* ── Seshat: Módulo Docente ── */}
+                  <button
+                    onClick={sendToSeshat}
+                    disabled={seshatToast === 'sending'}
+                    title={isMarkedSeshat ? 'Ya enviado a Seshat (Docencia)' : 'Enviar a Seshat para docencia'}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                      isMarkedSeshat
+                        ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
+                        : 'text-emerald-500 bg-emerald-500/8 hover:bg-emerald-500/18 border-emerald-500/20 hover:border-emerald-500/40'
+                    } disabled:opacity-50`}
+                  >
+                    {seshatToast === 'sending'
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <GraduationCap size={12} className={isMarkedSeshat ? 'animate-pulse' : ''} />
+                    }
+                    {isMarkedSeshat ? 'Seshat ✓' : 'Seshat'}
                   </button>
                 </div>
 
