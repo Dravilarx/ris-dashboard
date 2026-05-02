@@ -925,7 +925,24 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                </div>
                <div className="flex flex-col text-right">
                  <span className="text-[10px] font-black uppercase text-cyan-400 tracking-widest">{study.enrichedRadiologistName}</span>
-                 <span className="text-[9px] text-slate-500">Radiólogo Asignado</span>
+                 {/* ── Selector de Rol — conectado a canSign ── */}
+                 <div className="flex items-center gap-1 mt-0.5">
+                   {([
+                     { role: 'MED_STAFF',          label: 'Staff',    color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+                     { role: 'MED_RESIDENT',        label: 'Residente',color: 'bg-amber-500/20 text-amber-400 border-amber-500/30'   },
+                     { role: 'MED_REQUIRES_COSIGN', label: 'Cosign',   color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+                   ] as const).map(({ role, label, color }) => (
+                     <button
+                       key={role}
+                       onClick={() => setUserRole(role)}
+                       className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all ${
+                         userRole === role ? color : 'bg-white/0 text-slate-600 border-transparent hover:border-white/10 hover:text-slate-400'
+                       }`}
+                     >
+                       {label}
+                     </button>
+                   ))}
+                 </div>
                </div>
             </div>
 
