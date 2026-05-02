@@ -35,6 +35,7 @@ import { useTextBridge } from '@/hooks/useTextBridge';
 import FloatingAIMenu from '@/components/dictation/FloatingAIMenu';
 import SnippetsPanel, { processSnippetCommand, DEFAULT_SNIPPETS } from '@/components/dictation/SnippetsPanel';
 import SlashCommandMenu from '@/components/dictation/SlashCommandMenu';
+import SeshatExportModal from '@/components/dictation/SeshatExportModal';
 import LearningDictionaryPanel, { getDictionary } from '@/components/dictation/LearningDictionaryPanel';
 import type { Snippet } from '@/components/dictation/SnippetsPanel';
 import { useOllamaRefine, type RefineState, type OllamaStatus } from '@/hooks/useOllamaRefine';
@@ -98,39 +99,35 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [guardiaIAUsed, setGuardiaIAUsed] = useState(false); // pre-check si ya usó Guardia IA
 
   // ── MÓDULO DOCENTE — SESHAT ────────────────────────────────────────────────
-  // Persistencia por estudio: localStorage key = seshat_marked_<studyUID>
   const seshatStorageKey = `seshat_marked_${study?.studyInstanceUID || study?.accessionNumber || 'unknown'}`;
   const [isMarkedSeshat, setIsMarkedSeshat] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(seshatStorageKey) === 'true';
   });
-  const [seshatToast, setSeshatToast] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [showSeshatModal, setShowSeshatModal] = useState(false);
 
-  const sendToSeshat = async () => {
-    if (!study) return;
-    setSeshatToast('sending');
-    try {
-      const { error } = await supabase.from('educational_resources').insert({
-        age: study.age,
-        sex: study.sex,
-        modality: study.modality,
-        description: study.studyDescription,
-        target_collection: 'seshat_docencia',
-        anonymized: true,
-        origin_uid: study.studyInstanceUID || study.accessionNumber,
-        marked_at: new Date().toISOString(),
-      });
-      if (error) throw error;
-      setIsMarkedSeshat(true);
-      localStorage.setItem(seshatStorageKey, 'true');
-      setSeshatToast('done');
-    } catch (err) {
-      console.error('[Seshat] Error al enviar:', err);
-      setSeshatToast('error');
-    } finally {
-      setTimeout(() => setSeshatToast('idle'), 4000);
-    }
-  };
+  /** Función de envío con reintento automático (inyectada al modal) */
+  const sendToSeshat = useCallback(async (destinations: string[]) => {
+    if (!study) throw new Error('Sin estudio activo');
+    const { error } = await supabase.from('educational_resources').insert({
+      age: study.age,
+      sex: study.sex,
+      modality: study.modality,
+      description: study.studyDescription,
+      target_collection: 'seshat_docencia',
+      destinations,
+      anonymized: true,
+      origin_uid: study.studyInstanceUID || study.accessionNumber,
+      marked_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+  }, [study]);
+
+  const handleSeshatSuccess = useCallback((destinations: string[]) => {
+    setIsMarkedSeshat(true);
+    localStorage.setItem(seshatStorageKey, 'true');
+    console.info('[Seshat] Caso marcado para docencia →', destinations.join(', '));
+  }, [seshatStorageKey]);
 
 
   // ─── HISTORIAL PREVIO — SEMÁFORO DE ACCESO ─────────────────────────────────
@@ -1662,6 +1659,21 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     <BookOpen size={12} />
                     <span className="hidden lg:inline">Diccionario</span>
                   </button>
+
+                  {/* ── Botón Educación — Seshat (primer nivel) ── */}
+                  <button
+                    id="btn-educacion"
+                    onClick={() => setShowSeshatModal(true)}
+                    title="🎓 Enviar a Seshat (Módulo Docente)"
+                    className={`flex items-center gap-1.5 px-2.5 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all duration-150 border select-none ${
+                      isMarkedSeshat
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                        : 'bg-emerald-500/8 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/18 hover:text-emerald-300 hover:border-emerald-500/40'
+                    }`}
+                  >
+                    <GraduationCap size={12} className={isMarkedSeshat ? 'animate-pulse' : ''} />
+                    <span className="hidden lg:inline">{isMarkedSeshat ? 'Educación ✓' : 'Educación'}</span>
+                  </button>
              </div>
              </div>
 
@@ -2043,26 +2055,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     {criticalPathology && ` — ${criticalPathology}`}
                   </span>
                 )}
-                {/* Seshat feedback toast */}
-                <AnimatePresence>
-                  {seshatToast !== 'idle' && (
-                    <motion.span
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -10 }}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
-                        seshatToast === 'sending' ? 'bg-emerald-500/8 border-emerald-500/20 text-emerald-400' :
-                        seshatToast === 'done'    ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300' :
-                                                   'bg-red-500/15 border-red-500/30 text-red-400'
-                      }`}
-                    >
-                      {seshatToast === 'sending' && <Loader2 size={10} className="animate-spin" />}
-                      {seshatToast === 'sending' && 'Enviando a Seshat...'}
-                      {seshatToast === 'done'    && <><GraduationCap size={10} /> Caso enviado a Seshat para anonimización y docencia</>}
-                      {seshatToast === 'error'   && 'Error al conectar con Seshat'}
-                    </motion.span>
-                  )}
-                </AnimatePresence>
+
               </div>
 
               {/* Derecha: Utilidades + Acciones Principales */}
@@ -2084,23 +2077,6 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                     <AlertCircle size={12} /> B2B
                   </button>
 
-                  {/* ── Seshat: Módulo Docente ── */}
-                  <button
-                    onClick={sendToSeshat}
-                    disabled={seshatToast === 'sending'}
-                    title={isMarkedSeshat ? 'Ya enviado a Seshat (Docencia)' : 'Enviar a Seshat para docencia'}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                      isMarkedSeshat
-                        ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
-                        : 'text-emerald-500 bg-emerald-500/8 hover:bg-emerald-500/18 border-emerald-500/20 hover:border-emerald-500/40'
-                    } disabled:opacity-50`}
-                  >
-                    {seshatToast === 'sending'
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <GraduationCap size={12} className={isMarkedSeshat ? 'animate-pulse' : ''} />
-                    }
-                    {isMarkedSeshat ? 'Seshat ✓' : 'Seshat'}
-                  </button>
                 </div>
 
                 {/* Acción: Pausar Examen */}
@@ -3112,6 +3088,21 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         isOpen={showDictionary}
         onClose={() => { setShowDictionary(false); setDictPrefill(''); }}
         prefillHeard={dictPrefill}
+      />
+
+      {/* ─── Modal Exportación Docente — Seshat ─── */}
+      <SeshatExportModal
+        isOpen={showSeshatModal}
+        onClose={() => setShowSeshatModal(false)}
+        onSend={sendToSeshat}
+        onSuccess={handleSeshatSuccess}
+        caseInfo={{
+          modality: study?.modality,
+          description: study?.studyDescription,
+          age: study?.age,
+          sex: study?.sex,
+          originUid: study?.studyInstanceUID || study?.accessionNumber,
+        }}
       />
 
     </motion.div>
