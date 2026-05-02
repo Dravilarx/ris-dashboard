@@ -27,7 +27,10 @@ import {
   Stethoscope,
   FolderOpen,
   Shield,
-  BarChart2
+  BarChart2,
+  Atom,
+  GraduationCap,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -173,6 +176,7 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [eduExportStudyId, setEduExportStudyId] = useState<number | null>(null);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
   const router = useRouter();
 
@@ -282,6 +286,56 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
     };
   }, [fetchPendingAddendums]);
   // ─────────────────────────────────────────────────────────────────────────
+
+  const handleDeriveToSeshat = async () => {
+    const study = data?.find(s => s.id === selectedId);
+    if (!study) return;
+
+    try {
+      const { error } = await supabase.from('oncology_evaluations').insert({
+        external_ref_id: study.accessionNumber,
+        patient_id: study.effectivePatientId,
+        institution_id: study.institutionId,
+        origin: 'multiverse',
+        status: 'pending_analysis'
+      });
+
+      if (error) {
+        console.error('[SESHAT Integration] Error:', error);
+        alert('Error al derivar a SESHAT: ' + error.message);
+      } else {
+        alert('Estudio derivado exitosamente al Comité Oncológico (SESHAT).');
+      }
+    } catch (err) {
+      console.error('[SESHAT Integration] Exception:', err);
+      alert('Error en conexión: ' + (err as Error).message);
+    }
+  };
+
+  const handleDeriveToEdu = async (target: string) => {
+    if (eduExportStudyId === null) return;
+    const study = data?.find(s => s.id === eduExportStudyId);
+    if (!study) return;
+
+    try {
+      const { error } = await supabase.from('educational_resources').insert({
+        age: study.age,
+        sex: study.sex,
+        modality: study.modality,
+        description: study.studyDescription,
+        target_collection: target
+      });
+
+      if (error) {
+        alert('Error al exportar: ' + error.message);
+      } else {
+        alert(`Exportado exitosamente a ${target} (Datos anonimizados correctamente)`);
+        setEduExportStudyId(null);
+      }
+    } catch (e) {
+      alert('Excepción: ' + (e as Error).message);
+    }
+  };
 
   const handleStartDiagnosis = () => {
     const study = data?.find(s => s.id === selectedId);
@@ -842,6 +896,25 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
                 Anexos
               </button>
               <div className="w-[1px] h-8 bg-white/10 mx-2" />
+
+              {currentRole === 'MED_STAFF' && ['CT', 'MRI', 'MR', 'PET'].includes(data.find(s => s.id === selectedId)?.modality || '') && (
+                <button 
+                  onClick={handleDeriveToSeshat}
+                  className="bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 px-6 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2"
+                  title="Derivar estudio a Comité Oncológico Multiverso"
+                >
+                  <Atom size={16} /> ENVIAR A SESHAT
+                </button>
+              )}
+
+              <button 
+                onClick={() => setEduExportStudyId(selectedId)}
+                className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2"
+                title="Exportar para Educación (Anónimo)"
+              >
+                <GraduationCap size={16} /> EDUCACIÓN
+              </button>
+
               <button 
                 onClick={handleStartDiagnosis}
                 className="bg-amber-500 hover:bg-amber-400 text-[#020408] px-8 py-2.5 rounded-xl text-xs font-black hover:scale-105 transition-all shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] flex items-center gap-3 active:scale-95 group"
@@ -850,6 +923,53 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {eduExportStudyId !== null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#020408] border border-white/10 rounded-2xl p-6 shadow-2xl max-w-sm w-full relative"
+            >
+              <button 
+                onClick={() => setEduExportStudyId(null)}
+                className="absolute top-4 right-4 text-white/40 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="flex flex-col items-center mb-6 text-center">
+                <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                  <GraduationCap className="text-emerald-400" size={24} />
+                </div>
+                <h3 className="text-lg font-black text-white mb-2">Exportar para Educación</h3>
+                <p className="text-xs text-text-muted">
+                  El sistema anonimizará este estudio (Edad, Sexo, Modalidad, Hallazgos), eliminando todo PHI (Nombre, RUT, F. Nacimiento) de forma segura.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => handleDeriveToEdu('Universidad (UANTOF)')}
+                  className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-white/5 border border-white/10 hover:bg-emerald-500/20 hover:border-emerald-500/30 transition-all text-white text-left flex justify-between items-center group"
+                >
+                  <span>Universidad (UANTOF)</span>
+                  <ArrowRight size={16} className="text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+                <button 
+                  onClick={() => handleDeriveToEdu('Colección Docente AMIS')}
+                  className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-white/5 border border-white/10 hover:bg-emerald-500/20 hover:border-emerald-500/30 transition-all text-white text-left flex justify-between items-center group"
+                >
+                  <span>Colección Docente AMIS</span>
+                  <ArrowRight size={16} className="text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { 
@@ -8,9 +8,10 @@ import {
   ChevronLeft, ChevronRight, FileDigit, ScanFace, Sparkles,
   Command, Search, Mic, FileWarning, ZoomIn, ZoomOut, RotateCw, Clock, Stethoscope,
   Plus, Trash2, X, AlertTriangle, AlertCircle, Smartphone, Loader2,
-  LayoutGrid, List, ExternalLink, Layout, Minimize2, Eye, Printer, ClipboardList
+  LayoutGrid, List, ExternalLink, Layout, Minimize2, Eye, Printer, ClipboardList,
+  Wand2, Cpu, Zap, Brain
 } from 'lucide-react';
-import { QRCodeCanvas } from 'qrcode.react'; 
+
 import { supabase } from '@/lib/supabase';
 
 export interface Template {
@@ -28,6 +29,12 @@ const DEFAULT_TEMPLATES: Template[] = [
 ];
 import { EnrichedStudy } from '@/types/ris';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useInvoxDictation, type InvoxState } from '@/hooks/useInvoxDictation';
+import { useCentralDictation, type DictationState, type ServerStatus } from '@/hooks/useCentralDictation';
+import { useTextBridge } from '@/hooks/useTextBridge';
+import FloatingAIMenu from '@/components/dictation/FloatingAIMenu';
+import SnippetsPanel, { processSnippetCommand } from '@/components/dictation/SnippetsPanel';
+import { useOllamaRefine, type RefineState, type OllamaStatus } from '@/hooks/useOllamaRefine';
 import { StudyFile } from '@/lib/server/services/legacyRisService';
 
 export default function DictationClient({ study, annexes }: { study: EnrichedStudy, annexes: StudyFile[] }) {
@@ -127,6 +134,62 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   // REMOTE DICTATION STATES
   const [showRemoteQR, setShowRemoteQR] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState<'disconnected' | 'linked' | 'recording'>('disconnected');
+
+  // ─── TEXT-BRIDGE (Móvil → PC via SSE) ─────────────────────────────────────
+  const {
+    sessionId: bridgeSessionId,
+    mobileText: bridgeMobileText,
+    mobileConnected: bridgeMobileConnected,
+    isRefining: bridgeIsRefining,
+    mobileUrl: bridgeMobileUrl,
+    createSession: bridgeCreateSession,
+    refineText: bridgeRefineText,
+    clearBridgeText: bridgeClearText,
+  } = useTextBridge();
+  const prevBridgeTextRef = useRef('');
+
+  // Crear sesión de bridge al montar
+  useEffect(() => {
+    bridgeCreateSession();
+  }, [bridgeCreateSession]);
+
+  // Auto-cerrar QR overlay cuando el celular se conecta
+  useEffect(() => {
+    if (bridgeMobileConnected && showRemoteQR) {
+      setShowRemoteQR(false);
+    }
+  }, [bridgeMobileConnected, showRemoteQR]);
+
+  // Cuando el móvil envía texto nuevo → calcular DELTA e insertar solo lo nuevo
+  useEffect(() => {
+    if (!bridgeMobileText || bridgeMobileText === prevBridgeTextRef.current) return;
+    
+    const prev = prevBridgeTextRef.current;
+    const fullText = bridgeMobileText;
+    prevBridgeTextRef.current = fullText;
+
+    // Calcular DELTA: solo lo que es NUEVO respecto al envío anterior
+    // El celular siempre envía el textarea completo (acumulativo),
+    // así que el delta es lo que sobra después del texto anterior
+    let delta = fullText;
+    if (prev && fullText.startsWith(prev)) {
+      delta = fullText.substring(prev.length);
+    }
+
+    const cleanDelta = delta.replace(/^[ \t]+|[ \t]+$/g, '');
+    if (!cleanDelta) return; // Sin texto nuevo, no insertar nada
+
+    const separator = /^[\n.,;:!?)]/.test(cleanDelta) ? '' : ' ';
+
+    // Agregar solo el DELTA al final de la sección activa
+    setSections(prevSections => {
+      const current = prevSections[activeSection];
+      const prefix = current.trim() ? separator : '';
+      return { ...prevSections, [activeSection]: current + prefix + cleanDelta };
+    });
+
+    console.info(`[Text-Bridge] ✅ Delta insertado en ${activeSection}: "${cleanDelta.substring(0, 60)}"`);
+  }, [bridgeMobileText, activeSection]);
   const [remoteToken, setRemoteToken] = useState<string>('');
   
   // Generating remote token on mount
@@ -206,6 +269,8 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   ].filter(Boolean).join('\n\n');
 
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showSnippets, setShowSnippets] = useState(false);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const [activeAttachment, setActiveAttachment] = useState<StudyFile | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -287,6 +352,117 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       alert(error);
     }
   });
+
+  // ─── INVOX MEDICAL — MOTOR DE DICTADO PROFESIONAL ────────────────────────
+  const {
+    invoxState,
+    isListening: invoxListening,
+    isReady: invoxReady,
+    isLoadingOrConnecting: invoxConnecting,
+    interimText: invoxInterimText,
+    loginProgress: invoxLoginProgress,
+    micPermission: invoxMicPermission,
+    toggleInvox,
+    reconnect: invoxReconnect,
+  } = useInvoxDictation({
+    activeTextareaRef: sectionRefs[activeSection],
+    onTranscriptionSuccess: (fullDomText) => {
+      setSections(prev => ({ ...prev, [activeSection]: fullDomText }));
+    },
+    onInterimText: (_partial) => {},
+    onLoginProgress: (_pct) => {},
+  });
+
+  const invoxStatusLabel: Record<InvoxState, string> = {
+    loading: 'CARGANDO...', connecting: 'CONECTANDO...', ready: 'LISTO',
+    listening: 'DICTANDO', paused: 'EN PAUSA', error: 'ERROR', unavailable: 'NO DISPONIBLE',
+  };
+  const invoxStatusColor: Record<InvoxState, string> = {
+    loading: 'text-slate-500', connecting: 'text-blue-400', ready: 'text-emerald-400',
+    listening: 'text-rose-400', paused: 'text-amber-400', error: 'text-red-500', unavailable: 'text-slate-600',
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ─── SERVIDOR CENTRAL — DICTADO POR BLOQUES (HTTP BATCH) ──────────────────
+  const {
+    state: centralState,
+    serverStatus,
+    isRecording: centralRecording,
+    isProcessing: centralProcessing,
+    recordingDuration,
+    audioLevel,
+    lastError: centralError,
+    lastResult: centralResult,
+    toggleRecording: toggleCentralDictation,
+    checkServer,
+  } = useCentralDictation({
+    serverUrl: process.env.NEXT_PUBLIC_AMIS_VOICE_URL || 'http://localhost:8769',
+    onTranscriptionSuccess: (text) => {
+      const currentRef = sectionRefs[activeSection]?.current;
+      // Preserve newlines from spoken punctuation commands - only trim spaces, not \n
+      const cleanText = text.replace(/^[ \t]+|[ \t]+$/g, '');
+      // Smart separator: if text starts with newline or punctuation, no extra space
+      const separator = /^[\n.,;:!?)]/.test(cleanText) ? '' : ' ';
+      if (currentRef) {
+        const start = currentRef.selectionStart;
+        const end = currentRef.selectionEnd;
+        setSections(prev => {
+          const before = prev[activeSection].substring(0, start);
+          const after = prev[activeSection].substring(end);
+          return { ...prev, [activeSection]: before + separator + cleanText + after };
+        });
+        setTimeout(() => {
+          currentRef.focus();
+          const newPos = start + cleanText.length + separator.length;
+          currentRef.setSelectionRange(newPos, newPos);
+        }, 50);
+      } else {
+        setSections(prev => ({ ...prev, [activeSection]: prev[activeSection] + separator + cleanText }));
+      }
+    },
+  });
+
+  const centralStatusLabel: Record<DictationState, string> = {
+    idle: serverStatus === 'online' ? 'LISTO' : serverStatus === 'offline' ? 'SIN SERVIDOR' : 'VERIFICANDO...',
+    recording: `GRABANDO ${recordingDuration.toFixed(1)}s`,
+    processing: 'TRANSCRIBIENDO...',
+    error: 'ERROR',
+  };
+  const centralStatusColor: Record<DictationState, string> = {
+    idle: serverStatus === 'online' ? 'text-emerald-400' : 'text-slate-600',
+    recording: 'text-red-400',
+    processing: 'text-cyan-400',
+    error: 'text-red-500',
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ─── OLLAMA REFINE — REFINADO CLÍNICO LOCAL (GEMMA 2 + M2 PRO GPU) ──────
+  const [isTextRefined, setIsTextRefined] = useState(false);
+  const {
+    refineState,
+    ollamaStatus,
+    isRefining,
+    lastResult: refineResult,
+    lastError: refineError,
+    lastDurationMs: refineDurationMs,
+    refine: ollamaRefine,
+  } = useOllamaRefine();
+
+  const handleRefineReport = useCallback(async () => {
+    const result = await ollamaRefine(sections, {
+      modality: study.modality,
+      studyDescription: study.studyDescription,
+      sex: study.sex,
+      age: study.age,
+    });
+    if (result) {
+      setSections(result.sections);
+      setBaseSections(result.sections);
+      setIsTextRefined(true);
+      setHighlightColor('text-slate-300'); // Cambiar a Negro/Humo (validado)
+    }
+  }, [sections, ollamaRefine, study.modality, study.studyDescription, study.sex, study.age]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   // REALTIME ANTENNA (SUPABASE)
   useEffect(() => {
@@ -543,10 +719,20 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         e.preventDefault();
         toggleRecording();
       }
+      // F3 — Toggle Dictado Central (Servidor AMIS Voice)
+      if (e.key === 'F3') {
+        e.preventDefault();
+        toggleCentralDictation();
+      }
+      // F4 — Refinar Informe Completo con Gemma 2 (único paso final)
+      if (e.key === 'F4') {
+        e.preventDefault();
+        if (!isRefining) handleRefineReport();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRecording]);
+  }, [isRecording, centralState, isRefining, handleRefineReport]);
 
 
   const isAllFilled = sections.technique.trim() && sections.history.trim() && sections.findings.trim() && sections.impression.trim();
@@ -671,27 +857,94 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                </div>
             </div>
 
-            <div className="flex items-center gap-4 px-4 bg-white/5 rounded-xl border border-white/5 h-12">
-                <div className="flex items-center gap-2">
-                   <div className={`p-2 rounded-lg transition-all duration-500 ${
-                     remoteStatus === 'recording' ? 'bg-rose-500/20 text-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse' :
-                     remoteStatus === 'linked' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]' :
-                     'bg-white/5 text-slate-600'
-                   }`}>
-                     <Smartphone size={18} />
-                   </div>
-                   <div className="flex flex-col">
-                      <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${
-                        remoteStatus === 'recording' ? 'text-rose-400' :
-                        remoteStatus === 'linked' ? 'text-emerald-400' :
-                        'text-slate-600'
-                      }`}>Móvil</span>
-                      <span className="text-[10px] font-bold text-white/90">
-                        {remoteStatus === 'recording' ? 'DICTANDO...' : remoteStatus === 'linked' ? 'VINCULADO' : 'SYNC OFF'}
-                      </span>
-                   </div>
+            {/* Indicador VOCALIS en header */}
+            <div className="flex items-center gap-3 px-3 bg-white/5 rounded-xl border border-white/5 h-12">
+                <div className={`p-1.5 rounded-lg transition-all duration-500 ${
+                  invoxListening ? 'bg-rose-500/20 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse' :
+                  invoxState === 'ready' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' :
+                  invoxConnecting ? 'bg-blue-500/20 text-blue-400' :
+                  invoxState === 'error' ? 'bg-red-500/20 text-red-400' :
+                  'bg-white/5 text-slate-600'
+                }`}>
+                  <Stethoscope size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${invoxStatusColor[invoxState]}`}>Vocalis</span>
+                  <span className="text-[10px] font-bold text-white/90">{invoxStatusLabel[invoxState]}</span>
                 </div>
             </div>
+
+            {/* Indicador SERVIDOR CENTRAL AMIS Voice en header */}
+            <div className="flex items-center gap-3 px-3 bg-white/5 rounded-xl border border-white/5 h-12">
+                <div className={`p-1.5 rounded-lg transition-all duration-500 ${
+                  centralRecording ? 'bg-red-500/20 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' :
+                  centralProcessing ? 'bg-cyan-500/20 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.4)] animate-pulse' :
+                  serverStatus === 'online' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' :
+                  serverStatus === 'offline' ? 'bg-red-500/20 text-red-400' :
+                  'bg-white/5 text-slate-600'
+                }`}>
+                  <Cpu size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${centralStatusColor[centralState]}`}>AMIS Voice</span>
+                  <span className="text-[10px] font-bold text-white/90">{centralStatusLabel[centralState]}</span>
+                </div>
+            </div>
+
+            {/* Indicador GEMMA 2 (Motor AMIS-Voice) en header */}
+            <div className={`flex items-center gap-3 px-3 rounded-xl border h-12 transition-all duration-500 ${
+              ollamaStatus === 'online' && !isRefining ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5'
+            }`}>
+                <div className={`p-1.5 rounded-lg transition-all duration-500 ${
+                  isRefining ? 'bg-violet-500/20 text-violet-400 shadow-[0_0_15px_rgba(139,92,246,0.4)] animate-pulse' :
+                  refineState === 'success' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' :
+                  refineState === 'error' ? 'bg-red-500/20 text-red-400' :
+                  ollamaStatus === 'online' ? 'bg-emerald-500/10 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.2)]' :
+                  ollamaStatus === 'warming' ? 'bg-amber-500/15 text-amber-400' :
+                  ollamaStatus === 'not_detected' ? 'bg-red-500/15 text-red-400' :
+                  'bg-white/5 text-slate-600'
+                }`}>
+                  <Brain size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${
+                    isRefining ? 'text-violet-400' :
+                    refineState === 'success' ? 'text-emerald-400' :
+                    refineState === 'error' ? 'text-red-500' :
+                    ollamaStatus === 'online' ? 'text-emerald-400' :
+                    ollamaStatus === 'warming' ? 'text-amber-400' :
+                    ollamaStatus === 'not_detected' ? 'text-red-400' :
+                    'text-slate-600'
+                  }`}>Gemma 2</span>
+                  <span className="text-[10px] font-bold text-white/90">
+                    {isRefining ? 'REFINANDO...' :
+                     refineState === 'success' ? `OK ${refineDurationMs ? `(${(refineDurationMs/1000).toFixed(1)}s)` : ''}` :
+                     refineState === 'error' ? 'ERROR' :
+                     ollamaStatus === 'online' ? 'GPU LISTA' :
+                     ollamaStatus === 'warming' ? 'CARGANDO...' :
+                     ollamaStatus === 'not_detected' ? 'NO DETECTADO' :
+                     ollamaStatus === 'offline' ? 'OFFLINE' : 'VERIFICANDO'}
+                  </span>
+                </div>
+            </div>
+
+            {/* Indicador MÓVIL (backup) */}
+            <div className="flex items-center gap-2 px-3 bg-white/5 rounded-xl border border-white/5 h-12">
+                <div className={`p-1.5 rounded-lg transition-all duration-500 ${
+                  remoteStatus === 'recording' ? 'bg-cyan-500/20 text-cyan-400 animate-pulse' :
+                  remoteStatus === 'linked' ? 'bg-slate-400/20 text-slate-400' :
+                  'bg-white/5 text-slate-600'
+                }`}>
+                  <Smartphone size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className={`text-[9px] font-black uppercase tracking-[0.2em] leading-none ${remoteStatus === 'recording' ? 'text-cyan-400' : 'text-slate-600'}`}>Móvil</span>
+                  <span className="text-[10px] font-bold text-white/90">
+                    {remoteStatus === 'recording' ? 'BACKUP ACTIVO' : remoteStatus === 'linked' ? 'VINCULADO' : 'BACKUP OFF'}
+                  </span>
+                </div>
+            </div>
+
         </div>
       </header>
 
@@ -742,7 +995,63 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         )}
       </AnimatePresence>
 
+      {/* ══════ BANNER MICRÓFONO DENEGADO ══════ */}
+      <AnimatePresence>
+        {invoxMicPermission === 'denied' && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="shrink-0 z-20">
+            <div className="bg-gradient-to-r from-rose-950/90 to-[#020408]/80 border-b border-rose-500/40 px-8 py-2.5 flex items-center gap-4">
+              <span className="text-rose-400 text-sm">🎤</span>
+              <p className="text-[11px] text-rose-200 font-bold flex-1">
+                Micrófono bloqueado — Chrome denegó el acceso al micrófono para Vocalis.
+                <span className="font-normal text-rose-300/70 ml-2">Haz clic en el ícono 🔒 en la barra de direcciones → Permisos del sitio → Micrófono → Permitir. Luego recarga.</span>
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══════ BANNER CONEXIÓN INVOX (MAC — REMOTE SERVICE) ══════ */}
+
+      <AnimatePresence>
+        {(invoxState === 'error' || invoxState === 'connecting') && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="relative shrink-0 z-20"
+          >
+            <div className="bg-gradient-to-r from-blue-950/90 via-blue-900/70 to-[#020408]/80 border-b border-blue-500/30 backdrop-blur-xl px-8 py-3 flex items-center gap-4 flex-wrap">
+              <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400 text-xs font-black">!</div>
+              <div className="flex-1 min-w-[220px]">
+                <p className="text-[11px] text-blue-200 font-bold mb-0.5">Invox Medical — Aceptar certificado del puerto 8443</p>
+                <p className="text-[10px] text-blue-300/70 leading-relaxed">
+                  Haz clic en <span className="font-bold text-blue-200">&ldquo;Aceptar Cert :8443&rdquo;</span> → se abrirá una <span className="font-bold text-white">página en blanco</span> (normal, es el servidor WebSocket).<br/>
+                  Cierra esa pestaña y haz clic en <span className="font-bold text-emerald-300">&ldquo;Reconectar&rdquo;</span>.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <a
+                  href="https://sdk.invoxmedical.com:8443"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-[10px] font-black uppercase tracking-widest text-blue-300 transition-all whitespace-nowrap"
+                >
+                  <ExternalLink size={10} /> Aceptar Cert :8443
+                </a>
+                <button
+                  onClick={invoxReconnect}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-[10px] font-black uppercase tracking-widest text-emerald-300 transition-all whitespace-nowrap"
+                >
+                  <RotateCw size={10} /> Reconectar
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Workspace Area */}
+
       <div className="flex-1 flex overflow-hidden">
         
         {/* Panel Izquierdo: Contexto Clínico (The Side-Cockpit) */}
@@ -1019,77 +1328,198 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
 
         {/* Panel Central: Editor de Texto 'Vocalis & Groq' (70%) */}
         <div className="flex-1 flex flex-col relative bg-[#020408]">
-           
-           {/* Editor Toolbar Simulator con Vocalis */}
-           <div className="h-14 border-b border-white/5 bg-white/[0.02] flex items-center px-6 justify-between shrink-0">
-             
-             <div className="flex items-center gap-4">
-                <button 
-                  onClick={toggleRecording}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs transition-all border ${
-                    isRecording 
-                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.3)]' 
-                      : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
-                  }`}
-                >
-                  {isRecording ? (
-                    <div className="flex items-center justify-center gap-0.5 h-3.5 w-4 overflow-hidden">
-                      <motion.div animate={{ height: ["40%", "100%", "40%"] }} transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }} className="w-0.5 bg-rose-400 rounded-full" />
-                      <motion.div animate={{ height: ["100%", "30%", "100%"] }} transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.1 }} className="w-0.5 bg-rose-400 rounded-full" />
-                      <motion.div animate={{ height: ["50%", "100%", "50%"] }} transition={{ duration: 0.9, repeat: Infinity, ease: "easeInOut", delay: 0.2 }} className="w-0.5 bg-rose-400 rounded-full" />
-                      <motion.div animate={{ height: ["80%", "40%", "80%"] }} transition={{ duration: 0.7, repeat: Infinity, ease: "easeInOut", delay: 0.15 }} className="w-0.5 bg-rose-400 rounded-full" />
-                      <motion.div animate={{ height: ["30%", "90%", "30%"] }} transition={{ duration: 0.85, repeat: Infinity, ease: "easeInOut", delay: 0.3 }} className="w-0.5 bg-rose-400 rounded-full" />
-                    </div>
-                  ) : (
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
-                    </span>
-                  )}
-                  {!isRecording && <Mic size={14} />}
-                  {isRecording ? 'GRABANDO (F2)' : 'AMIS VOICE (F2)'}
-                </button>
 
-                {isTranscribing && (
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2 animate-pulse">
-                    <Activity size={12} /> Procesando Groq AI...
-                  </span>
-                )}
+           {/* ═══ BARRA DE HERRAMIENTAS DE DICTADO ═══ */}
+           <div className="h-auto min-h-[56px] border-b border-white/5 bg-white/[0.02] flex items-center px-6 justify-between shrink-0 gap-4 flex-wrap py-2">
+
+             {/* ── ZONA IZQUIERDA: BOTÓN VOCALIS (PRINCIPAL) + interim ── */}
+             <div className="flex items-center gap-3">
+
+               {/* BOTÓN VOCALIS — Motor primario */}
+               <button
+                 id="btn-vocalis-primary"
+                 onClick={invoxState === 'error' ? invoxReconnect : toggleInvox}
+                 disabled={invoxConnecting || invoxState === 'unavailable'}
+                 title={
+                   invoxMicPermission === 'denied' ? '⚠️ Permiso de micrófono denegado — actívalo en Ajustes del sitio (🔒 en la barra de Chrome)' :
+                   invoxState === 'unavailable' ? 'SDK Invox Medical no disponible' :
+                   invoxState === 'error' ? 'Haz clic para reconectar Vocalis' :
+                   invoxListening ? 'Haz clic para PAUSAR el dictado' :
+                   invoxState === 'ready' ? 'Haz clic aquí para COMENZAR a dictar — luego habla al micrófono' : 'Vocalis'
+                 }
+                 className={`flex items-center gap-2 px-4 py-2 rounded-full font-black text-[11px] uppercase tracking-widest transition-all duration-300 border select-none ${
+                   invoxListening
+                     ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 shadow-[0_0_20px_rgba(244,63,94,0.35)]'
+                     : invoxState === 'ready'
+                     ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                     : invoxConnecting
+                     ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-wait'
+                     : invoxState === 'error'
+                     ? 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                     : 'bg-white/5 text-slate-600 border-white/10 cursor-not-allowed opacity-50'
+                 }`}
+               >
+                 {invoxListening ? (
+                   <div className="flex items-center justify-center gap-[3px] h-4 w-5 overflow-hidden">
+                     <motion.div animate={{ scaleY: [0.3, 1, 0.3] }}   transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut', delay: 0.0 }} className="w-[3px] bg-rose-400 rounded-full origin-bottom h-full" />
+                     <motion.div animate={{ scaleY: [1, 0.2, 1] }}     transition={{ duration: 0.4, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }} className="w-[3px] bg-rose-400 rounded-full origin-bottom h-full" />
+                     <motion.div animate={{ scaleY: [0.5, 1, 0.5] }}   transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }} className="w-[3px] bg-rose-400 rounded-full origin-bottom h-full" />
+                     <motion.div animate={{ scaleY: [0.8, 0.3, 0.8] }} transition={{ duration: 0.45, repeat: Infinity, ease: 'easeInOut', delay: 0.05 }} className="w-[3px] bg-rose-400 rounded-full origin-bottom h-full" />
+                     <motion.div animate={{ scaleY: [0.2, 1, 0.2] }}   transition={{ duration: 0.55, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }} className="w-[3px] bg-rose-400 rounded-full origin-bottom h-full" />
+                   </div>
+                 ) : invoxConnecting ? (
+                   <Loader2 size={14} className="animate-spin" />
+                 ) : invoxState === 'ready' ? (
+                   <span className="relative flex h-2.5 w-2.5">
+                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                   </span>
+                 ) : (
+                   <Stethoscope size={14} />
+                 )}
+                 <span>
+                   {invoxListening ? 'VOCALIS — DICTANDO'
+                    : invoxState === 'error' ? 'VOCALIS — REINTENTAR'
+                    : invoxConnecting ? `VOCALIS ${invoxLoginProgress > 0 ? invoxLoginProgress + '%' : '...'}`
+                    : 'VOCALIS'}
+                 </span>
+                 <span className="ml-1 px-1.5 py-0.5 rounded bg-white/10 text-[8px] font-black uppercase tracking-wider text-white/40 hidden lg:inline">
+                   Principal
+                 </span>
+               </button>
+
+               {/* Texto parcial en tiempo real (hipótesis Invox) */}
+               <AnimatePresence>
+                 {invoxInterimText && (
+                   <motion.span
+                     initial={{ opacity: 0, x: -8 }}
+                     animate={{ opacity: 1, x: 0 }}
+                     exit={{ opacity: 0 }}
+                     className={`text-[11px] font-medium italic ${highlightColor} opacity-70 max-w-[180px] truncate hidden lg:inline`}
+                     title={invoxInterimText}
+                   >
+                     {invoxInterimText}
+                   </motion.span>
+                 )}
+               </AnimatePresence>
+
+               {/* Indicador Groq (backup) */}
+               {isTranscribing && (
+                 <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2 animate-pulse">
+                   <Activity size={12} /> Groq AI...
+                 </span>
+               )}
+
+               {/* SEPARADOR */}
+               <div className="w-px h-6 bg-white/10 hidden lg:block" />
+
+               {/* BOTÓN DICTADO CENTRAL — F3 toggle */}
+               <div className="flex items-center gap-2">
+                 {/* Barra de nivel de audio */}
+                 {centralRecording && (
+                   <div className="flex items-end gap-[1px] h-5 w-8" title={`Grabando ${recordingDuration.toFixed(1)}s`}>
+                     {[0.15, 0.3, 0.5, 0.7, 0.85, 1.0].map((threshold, i) => (
+                       <div
+                         key={i}
+                         className={`w-[3px] rounded-full transition-all duration-75 ${
+                           audioLevel >= threshold ? 'bg-red-400' : 'bg-white/10'
+                         }`}
+                         style={{ height: `${(i + 1) * 16}%` }}
+                       />
+                     ))}
+                   </div>
+                 )}
+                 <button
+                   id="btn-central-dictation"
+                   onClick={toggleCentralDictation}
+                   disabled={centralProcessing}
+                   title={
+                     centralRecording ? `🔴 Grabando ${recordingDuration.toFixed(1)}s — F3 para detener y transcribir` :
+                     centralProcessing ? '⏳ Transcribiendo en servidor central...' :
+                     serverStatus === 'online' ? 'Iniciar dictado (F3)' :
+                     serverStatus === 'offline' ? 'Servidor AMIS Voice no disponible' : 'Verificando servidor...'
+                   }
+                   className={`flex items-center gap-2 px-3 py-2 rounded-full font-black text-[11px] uppercase tracking-widest transition-all duration-150 border select-none ${
+                     centralRecording
+                       ? 'bg-red-500/25 text-red-300 border-red-400/60 shadow-[0_0_25px_rgba(239,68,68,0.4)] scale-105'
+                       : centralProcessing
+                       ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.2)] cursor-wait'
+                       : serverStatus === 'online'
+                       ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+                       : serverStatus === 'offline'
+                       ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                       : 'bg-white/5 text-slate-500 border-white/10 hover:bg-white/10'
+                   }`}
+                 >
+                   {centralRecording ? (
+                     <div className="flex items-center justify-center gap-[2px] h-4 w-4 overflow-hidden">
+                       <div className="w-[2px] bg-red-400 rounded-full origin-bottom animate-pulse" style={{ height: `${30 + audioLevel * 70}%` }} />
+                       <div className="w-[2px] bg-red-400 rounded-full origin-bottom animate-pulse" style={{ height: `${50 + audioLevel * 50}%` }} />
+                       <div className="w-[2px] bg-red-400 rounded-full origin-bottom animate-pulse" style={{ height: `${20 + audioLevel * 80}%` }} />
+                     </div>
+                   ) : centralProcessing ? (
+                     <Loader2 size={12} className="animate-spin" />
+                   ) : (
+                     <Cpu size={12} />
+                   )}
+                   <span className="hidden lg:inline">
+                     {centralRecording ? `${recordingDuration.toFixed(1)}s` :
+                      centralProcessing ? '...' : 'F3'}
+                   </span>
+                 </button>
+
+                 {/* Botón Snippets Clínicos */}
+                 <button
+                   id="btn-snippets"
+                   onClick={() => setShowSnippets(!showSnippets)}
+                   title="📋 Snippets Clínicos"
+                   className={`flex items-center gap-1.5 px-2.5 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all duration-150 border select-none ${
+                     showSnippets
+                       ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
+                       : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white'
+                   }`}
+                 >
+                   <ClipboardList size={12} />
+                   <span className="hidden lg:inline">Snippets</span>
+                 </button>
+             </div>
              </div>
 
-             <div className="flex items-center gap-4">
-                <div className="hidden md:flex items-center gap-4 mr-4 px-4 py-1.5 border-r border-white/5">
+             {/* ── ZONA DERECHA: HERRAMIENTAS + BOTÓN MÓVIL (BACKUP) ── */}
+             <div className="flex items-center gap-3">
+                <div className="hidden md:flex items-center gap-3 mr-2 px-3 py-1.5 border-r border-white/5">
                   <div className="flex flex-col text-right">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Métricas</span>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Palabras</span>
                     <span className="text-xs font-mono font-bold text-cyan-400">
-                      {getFullText().trim().split(/\s+/).filter(w => w.length > 0).length} PALABRAS
+                      {getFullText().trim().split(/\s+/).filter(w => w.length > 0).length}
                     </span>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowTemplates(!showTemplates)}
                   className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white rounded-md border border-white/10 transition-all"
                 >
                   <Command size={14} /> Plantillas
                 </button>
-                <button 
+                <button
                   onClick={() => {
-                    const colors = ['text-amber-400', 'text-purple-400', 'text-rose-400', 'text-cyan-400'];
+                    const colors = ['text-amber-400', 'text-purple-400', 'text-yellow-300', 'text-orange-400'];
                     const currentIdx = colors.indexOf(highlightColor);
                     setHighlightColor(colors[(currentIdx + 1) % colors.length]);
                   }}
                   className={`flex items-center justify-center w-8 h-8 rounded-md border border-white/10 transition-all bg-white/5 hover:bg-white/10 ${highlightColor}`}
-                  title="Cambiar Color de Resaltado"
+                  title="Color de seguridad para texto Vocalis (Naranja, Púrpura, Amarillo)"
                 >
-                  <div className={`w-3 h-3 rounded-full bg-current`} />
+                  <div className="w-3 h-3 rounded-full bg-current" />
                 </button>
-                <button 
+                <button
                   onClick={() => setBaseSections(sections)}
                   className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded-md border border-white/10 transition-all"
-                  title="Reset visual: Asentar todo el texto modificado a color base"
+                  title="Reset: asentar el texto dictado (deja de resaltarse)"
                 >
-                  <CheckCircle2 size={14} /> Refrescar Color
+                  <CheckCircle2 size={14} /> Reset
                 </button>
-                <button 
+                <button
                   onClick={handleAIReview}
                   disabled={isReviewingAI}
                   className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(168,85,247,0.2)] border border-purple-500/30 ${isReviewingAI ? 'bg-purple-900/50 text-purple-300 animate-pulse' : 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'}`}
@@ -1098,70 +1528,110 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                   Guardia IA
                 </button>
 
-                <button 
+                 {/* ═══ BOTÓN REFINAR INFORME — OLLAMA LOCAL (F4) ═══ */}
+                 <button
+                   id="btn-refinar-informe"
+                   onClick={handleRefineReport}
+                   disabled={isRefining || !Object.values(sections).some(v => v.trim())}
+                   title={`🪄 Refinar con Gemma 2 (Motor AMIS-Voice / M2 Pro) — F4${refineDurationMs ? ` · Última: ${(refineDurationMs/1000).toFixed(1)}s` : ''}${ollamaStatus === 'online' ? ' · GPU Activa' : ''}`}
+                   className={`relative px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest flex items-center gap-2.5 transition-all duration-300 border overflow-hidden ${
+                     isRefining
+                       ? 'bg-gradient-to-r from-violet-900/70 to-fuchsia-900/70 text-white border-violet-500/50 shadow-[0_0_30px_rgba(139,92,246,0.4)] cursor-wait'
+                       : refineState === 'success'
+                       ? 'bg-gradient-to-r from-emerald-900/50 to-teal-900/50 text-emerald-300 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
+                       : refineState === 'error'
+                       ? 'bg-gradient-to-r from-red-900/50 to-rose-900/50 text-red-300 border-red-500/40'
+                       : 'bg-gradient-to-r from-violet-500/15 to-fuchsia-500/15 text-violet-300 border-violet-500/40 hover:from-violet-500/25 hover:to-fuchsia-500/25 hover:shadow-[0_0_25px_rgba(139,92,246,0.3)] hover:border-violet-400/60'
+                   }`}
+                 >
+                   {isRefining && (
+                     <motion.div
+                       className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
+                       animate={{ x: ['-100%', '200%'] }}
+                       transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                     />
+                   )}
+                   {isRefining ? (
+                  <Loader2 size={15} className="animate-spin relative z-10" />
+                   ) : refineState === 'success' ? (
+                     <CheckCircle2 size={15} className="relative z-10" />
+                   ) : (
+                     <Wand2 size={15} className="relative z-10" />
+                   )}
+                   <span className="relative z-10">
+                     {isRefining ? 'Gemma 2...' : refineState === 'success' ? 'Refinado ✓' : '🪄 Refinar con Gemma 2'}
+                   </span>
+                   <span className="ml-1 px-1.5 py-0.5 rounded bg-white/10 text-[8px] font-black uppercase tracking-wider text-white/40 relative z-10 hidden lg:inline">
+                     F4
+                   </span>
+                 </button>
+
+                {/* BOTÓN MÓVIL — Sistema de respaldo */}
+                <button
+                  id="btn-movil-backup"
                   onClick={() => setShowRemoteQR(!showRemoteQR)}
-                  className="flex items-center gap-2 text-xs font-black px-4 py-2 bg-gradient-to-br from-slate-800 to-slate-900 text-white hover:from-cyan-600 hover:to-blue-700 rounded-xl border border-white/10 transition-all shadow-xl active:scale-95 group"
+                  title="Contingencia: usar smartphone como micrófono de respaldo (escanea QR)"
+                  className={`flex items-center gap-2 text-xs font-black px-3 py-2 rounded-xl border transition-all active:scale-95 group ${
+                    remoteStatus === 'recording'
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                      : remoteStatus === 'linked'
+                      ? 'bg-slate-700/80 text-slate-200 border-slate-500/40'
+                      : 'bg-white/5 text-slate-400 border-white/10 hover:bg-slate-800 hover:text-white hover:border-slate-500/50'
+                  }`}
                 >
-                  <span className="animate-bounce group-hover:animate-none">📱</span> Dictáfono Móvil
+                  <Smartphone size={14} className="group-hover:scale-110 transition-transform" />
+                  <span>Móvil</span>
+                  <span className="px-1.5 py-0.5 rounded bg-white/10 text-[8px] font-black uppercase tracking-wider text-white/40 hidden lg:inline">Backup</span>
                 </button>
              </div>
            </div>
 
-           {/* QR OVERLAY */}
+           {/* TEXT-BRIDGE QR OVERLAY */}
            <AnimatePresence>
-             {showRemoteQR && (
-               <motion.div 
-                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                 className="absolute inset-0 z-50 flex items-center justify-center p-8 bg-[#020408]/90 backdrop-blur-3xl"
-               >
-                  <div className="w-full max-w-sm bg-[#0a0f1d] border border-cyan-500/30 rounded-3xl p-8 flex flex-col items-center shadow-[0_0_80px_rgba(6,182,212,0.15)] relative overflow-hidden">
-                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent" />
-                    <button 
-                      onClick={() => setShowRemoteQR(false)}
-                      className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors"
-                    >
-                      <X size={20} />
-                    </button>
-
-                    <div className="p-3 bg-cyan-500/10 rounded-2xl mb-4">
-                      <Smartphone size={32} className="text-cyan-400" />
-                    </div>
-                    
-                    <h2 className="text-xl font-black text-white tracking-tighter text-center mb-1">Móvil Vinculado</h2>
-                    <p className="text-[11px] font-medium text-slate-500 text-center uppercase tracking-widest mb-8">Dictado Remoto encriptado de extremo a extremo</p>
-
-                    <div className="p-6 bg-white rounded-3xl shadow-[0_0_40px_rgba(255,255,255,0.1)] relative">
-                      <QRCodeCanvas 
-                        value={`https://tu-amis-30.vercel.app/mobile-mic/${remoteToken}?study_uid=${study.studyInstanceUID}`} 
-                        size={180} 
-                        level="H" 
-                        includeMargin={false}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                         <div className="w-10 h-10 bg-white border-4 border-white rounded-lg flex items-center justify-center">
-                            <Activity size={24} className="text-[#020408]" />
+              {showRemoteQR && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="absolute inset-0 z-50 flex items-center justify-center p-8 bg-[#020408]/90 backdrop-blur-3xl"
+                >
+                   <div className="w-full max-w-sm bg-[#0a0f1d] border border-cyan-500/30 rounded-3xl p-8 flex flex-col items-center shadow-[0_0_80px_rgba(6,182,212,0.15)] relative overflow-hidden">
+                     <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent" />
+                     <button onClick={() => setShowRemoteQR(false)} className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors">
+                       <X size={20} />
+                     </button>
+                     <div className="p-3 bg-cyan-500/10 rounded-2xl mb-4">
+                       <Smartphone size={32} className="text-cyan-400" />
+                     </div>
+                     <h2 className="text-xl font-black text-white tracking-tighter text-center mb-1">AMIS Text-Bridge</h2>
+                     <p className="text-[11px] font-medium text-slate-500 text-center uppercase tracking-widest mb-6">Dicte desde su celular con el teclado nativo</p>
+                     {bridgeMobileUrl ? (
+                       <div className="flex flex-col items-center gap-4 w-full">
+                         <div className="p-4 bg-white rounded-3xl shadow-[0_0_40px_rgba(255,255,255,0.1)]">
+                           {/* eslint-disable-next-line @next/next/no-img-element */}
+                           <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(bridgeMobileUrl)}`} alt="QR" width={160} height={160} style={{ imageRendering: 'pixelated' }} />
                          </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-8 space-y-4 w-full">
-                       <div className="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
-                          <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                          <span className="text-[10px] font-bold text-slate-300">Escanea para conectar micrófono móvil</span>
+                         <div className={`flex items-center gap-3 w-full p-3 rounded-2xl border ${bridgeMobileConnected ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/5 border-white/5'}`}>
+                           <div className={`w-2 h-2 rounded-full ${bridgeMobileConnected ? 'bg-emerald-400' : 'bg-slate-600 animate-ping'}`} />
+                           <span className={`text-[10px] font-bold ${bridgeMobileConnected ? 'text-emerald-300' : 'text-slate-400'}`}>
+                             {bridgeMobileConnected ? '\ud83d\udcf1 CELULAR CONECTADO' : 'Esperando conexi\u00f3n...'}
+                           </span>
+                         </div>
+                         <p className="text-[8px] text-slate-600 text-center font-mono break-all px-2">{bridgeMobileUrl}</p>
                        </div>
-                       <button 
-                         onClick={() => setShowRemoteQR(false)}
-                         className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all"
-                       >
-                         Continuar con Mic Local (F2)
-                       </button>
-                    </div>
-                  </div>
-               </motion.div>
-             )}
-           </AnimatePresence>
+                     ) : (
+                       <div className="flex items-center gap-2 text-slate-500">
+                         <Loader2 size={16} className="animate-spin" />
+                         <span className="text-xs">Creando sesi\u00f3n...</span>
+                       </div>
+                     )}
+                     <button onClick={() => setShowRemoteQR(false)} className="w-full mt-6 py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all">
+                       Cerrar
+                     </button>
+                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
            {/* Editor Area */}
            <div className="flex-1 px-16 py-12 relative overflow-hidden flex justify-center">
@@ -2144,6 +2614,71 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
              </motion.div>
          )}
       </AnimatePresence>
+
+      {/* ─── Text-Bridge: Indicador de conexión móvil ─── */}
+      <AnimatePresence>
+        {bridgeMobileConnected && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-40"
+          >
+            <div className="flex items-center gap-2 bg-emerald-950/80 border border-emerald-500/30 rounded-full px-4 py-2 backdrop-blur-lg shadow-lg">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <Smartphone size={12} className="text-emerald-400" />
+              <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Móvil Conectado</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Suite de Productividad: Menú Flotante IA ─── */}
+      <FloatingAIMenu
+        containerRef={editorContainerRef}
+        onAction={async (action, text) => {
+          const res = await fetch('/api/dictado/refine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sections: { technique: '', history: '', findings: text, impression: '' },
+              metadata: { modality: study.modality, studyDescription: study.studyDescription },
+              action,
+            }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          // Return the refined findings section as the processed text
+          return data.sections?.findings || text;
+        }}
+      />
+
+      {/* ─── Suite de Productividad: Panel de Snippets ─── */}
+      <SnippetsPanel
+        isOpen={showSnippets}
+        onClose={() => setShowSnippets(false)}
+        onInsert={(text) => {
+          const currentRef = sectionRefs[activeSection]?.current;
+          if (currentRef) {
+            const start = currentRef.selectionStart;
+            const end = currentRef.selectionEnd;
+            setSections(prev => {
+              const before = prev[activeSection].substring(0, start);
+              const after = prev[activeSection].substring(end);
+              return { ...prev, [activeSection]: before + text + after };
+            });
+            setTimeout(() => {
+              currentRef.focus();
+              const newPos = start + text.length;
+              currentRef.setSelectionRange(newPos, newPos);
+            }, 50);
+          } else {
+            setSections(prev => ({ ...prev, [activeSection]: prev[activeSection] + '\n' + text }));
+          }
+          setShowSnippets(false);
+        }}
+      />
 
     </motion.div>
   );
