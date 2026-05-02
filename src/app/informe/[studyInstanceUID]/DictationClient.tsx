@@ -92,6 +92,10 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showSignModal, setShowSignModal] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  // ── CHECKPOINT DE SEGURIDAD IA ─────────────────────────────────────────────
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationAction, setValidationAction] = useState<'inform' | 'validate' | null>(null);
+  const [guardiaIAUsed, setGuardiaIAUsed] = useState(false); // pre-check si ya usó Guardia IA
   
   // ─── HISTORIAL PREVIO — SEMÁFORO DE ACCESO ─────────────────────────────────
   // Gris  = sin historial detectado
@@ -694,6 +698,7 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         const data = await res.json();
         setAiReviewResults(data);
         setShowAIResults(true);
+        setGuardiaIAUsed(true); // Marcar que Guardia IA fue utilizada en esta sesión
      } catch (e) {
         console.error("AI Review failed", e);
      } finally {
@@ -1931,125 +1936,84 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
               </div>
             </div>
 
-            {/* Panel de Decisiones (Footer) */}
-            <div className="bg-[#050810] border-t border-white/5 p-4 flex items-center justify-between shrink-0 relative z-20">
-                 <div className="flex items-center gap-4">
-                    {/* Auto-Guardado y Patología Crítica */}
-                    <div className="flex flex-col gap-1">
-                       <span className="text-[10px] text-slate-500 font-mono">
-                          {lastSaved ? `Guardado Automático a las ${lastSaved.toLocaleTimeString()}` : 'Borrador sin cambios'}
-                       </span>
-                       <div className="flex items-center gap-6 bg-white/5 px-4 py-2 rounded-xl border border-white/10">
-                           <div className="flex flex-col">
-                              <span className="text-[9px] text-slate-500 uppercase font-bold tracking-widest mb-1">Pausa Clínica Obligatoria</span>
-                              <span className="text-[11px] text-white font-bold whitespace-nowrap">¿EXISTEN HALLAZGOS CRÍTICOS?</span>
-                           </div>
-                           
-                           <div className="flex items-center gap-2">
-                              <button 
-                                onClick={() => setCriticalAnswer(true)}
-                                className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${criticalAnswer === true ? 'bg-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.4)]' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                              >
-                                SI
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setCriticalAnswer(false);
-                                  setCriticalPathology(""); // Reset pathology if answer is NO
-                                }}
-                                className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${criticalAnswer === false ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                              >
-                                NO
-                              </button>
-                           </div>
+            {/* Panel de Decisiones (Footer) — Rediseño AMIS 2030 */}
+            <div className="bg-[#050810] border-t border-white/5 px-5 py-3 flex items-center justify-between shrink-0 relative z-20 gap-4">
 
-                           {criticalAnswer === true && (
-                                <select 
-                                  value={criticalPathology}
-                                  onChange={e => setCriticalPathology(e.target.value)}
-                                  className="bg-black border border-rose-500/50 text-rose-400 text-[10px] px-3 py-1.5 rounded-lg outline-none focus:border-rose-500 animate-in fade-in slide-in-from-left-2 shadow-[0_0_15px_rgba(244,63,94,0.1)]"
-                                >
-                                  <option value="">Seleccione Patología...</option>
-                                  <option value="ACV">ACV</option>
-                                  <option value="Neumotórax">Neumotórax</option>
-                                  <option value="TEP">TEP</option>
-                                  <option value="Paro Cardíaco">Paro Cardíaco</option>
-                                  <option value="Hemorragia Activa">Hemorragia Activa</option>
-                                </select>
-                           )}
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => setIsPendingModalOpen(true)}
-                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all tracking-widest"
-                    >
-                      PENDIENTE
-                    </button>
-
-                    <button 
-                      onClick={() => {
-                        setBaseSections(sections);
-                        setShowPreview(true);
-                      }}
-                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all tracking-widest flex items-center gap-2"
-                    >
-                      <Eye size={16} /> VISTA PREVIA PDF
-                    </button>
-
-                    <button 
-                      onClick={() => setIsPendingCenterModalOpen(true)}
-                      className="px-6 py-2.5 rounded-xl font-bold text-xs text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all tracking-widest flex items-center gap-2"
-                      title="Enviar a Portal B2B para acción del cliente"
-                    >
-                      <AlertCircle size={16} /> ENVIAR A B2B
-                    </button>
-
-                    <button 
-                      onClick={() => {
-                        setBaseSections(sections);
-                        handleUpdateStatus('REPORTED');
-                      }}
-                      disabled={!isAllFilled || criticalAnswer === null}
-                      className="px-6 py-2.5 rounded-xl font-black text-xs text-white bg-blue-500 hover:bg-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] tracking-widest"
-                      title={criticalAnswer === null ? "Debe responder la Pausa Clínica" : "Informar Estudio"}
-                    >
-                      INFORMAR
-                    </button>
-
-                    {/* ── DYNAMIC ACTION BUTTONS based on AMIS Role ── */}
-                    {canSign ? (
-                      /* MED_STAFF / MED_CHIEF → Primary green sign button */
-                      <button 
-                        onClick={() => {
-                          setBaseSections(sections);
-                          setShowSignModal(true);
-                        }}
-                        disabled={!isAllFilled || criticalAnswer === null}
-                        className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-[#39FF14] hover:bg-[#32e612] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(57,255,20,0.3)] hover:shadow-[0_0_20px_rgba(57,255,20,0.5)] tracking-widest flex items-center gap-2"
-                        title={criticalAnswer === null ? 'Debe responder la Pausa Clínica' : 'Validar y Firmar como Responsable Legal'}
-                      >
-                        <CheckCircle2 size={16} /> VALIDAR Y FIRMAR
-                      </button>
-                    ) : (
-                      /* MED_RESIDENT / MED_REQUIRES_COSIGN → Send to supervisor (orange) */
-                      <button
-                        onClick={async () => {
-                          if (!isAllFilled) return;
-                          if (criticalAnswer === null) { alert('Debe responder la Pausa Clínica antes de enviar.'); return; }
-                          await handleUpdateStatus('PENDING_VALIDATION');
-                        }}
-                        disabled={!isAllFilled || criticalAnswer === null}
-                        className="px-6 py-2.5 rounded-xl font-black text-xs text-black bg-orange-500 hover:bg-orange-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(249,115,22,0.4)] hover:shadow-[0_0_22px_rgba(249,115,22,0.6)] tracking-widest flex items-center gap-2 active:scale-95"
-                        title={criticalAnswer === null ? 'Debe responder la Pausa Clínica' : 'Enviar borrador al supervisor para su firma y validación legal'}
-                      >
-                        <Stethoscope size={16} /> ENVIAR A MI SUPERVISOR
-                      </button>
-                    )}
-                 </div>
+              {/* Izquierda: Auto-guardado + indicador crítico */}
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">
+                  {lastSaved ? `Guardado a las ${lastSaved.toLocaleTimeString()}` : 'Borrador sin cambios'}
+                </span>
+                {criticalAnswer === true && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/15 border border-rose-500/30 rounded-lg text-[10px] font-black text-rose-400 uppercase tracking-wider animate-pulse">
+                    <AlertCircle size={11} /> CRÍTICO
+                    {criticalPathology && ` — ${criticalPathology}`}
+                  </span>
+                )}
               </div>
+
+              {/* Derecha: Utilidades + Acciones Principales */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Mini-toolbar de utilidades */}
+                <div className="flex items-center gap-1.5 pr-3 border-r border-white/10">
+                  <button
+                    onClick={() => { setBaseSections(sections); setShowPreview(true); }}
+                    title="Vista Previa PDF"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-slate-400 bg-white/5 hover:bg-white/10 hover:text-white border border-white/10 transition-all"
+                  >
+                    <Eye size={12} /> PDF
+                  </button>
+                  <button
+                    onClick={() => setIsPendingCenterModalOpen(true)}
+                    title="Enviar a Portal B2B"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-rose-400 bg-rose-500/8 hover:bg-rose-500/15 border border-rose-500/20 transition-all"
+                  >
+                    <AlertCircle size={12} /> B2B
+                  </button>
+                </div>
+
+                {/* Acción: Pausar Examen */}
+                <button
+                  onClick={() => setIsPendingModalOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 hover:bg-amber-500/18 border border-amber-500/25 hover:border-amber-500/40 transition-all"
+                >
+                  <Clock size={13} /> Pausar
+                </button>
+
+                {/* Acción primaria: Informar (residente) o Validar (staff) */}
+                {canSign ? (
+                  /* STAFF / JEFE → Validar y Firmar */
+                  <button
+                    disabled={!isAllFilled}
+                    onClick={() => {
+                      if (!isAllFilled) return;
+                      setBaseSections(sections);
+                      setValidationAction('validate');
+                      setShowValidationModal(true);
+                    }}
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-black bg-[#39FF14] hover:bg-[#4fff30] disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(57,255,20,0.25)] hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] transition-all active:scale-95"
+                    title="Validar y Firmar como responsable legal"
+                  >
+                    <CheckCircle2 size={14} /> Validar
+                  </button>
+                ) : (
+                  /* RESIDENTE → Informar (envía a supervisor) */
+                  <button
+                    disabled={!isAllFilled}
+                    onClick={() => {
+                      if (!isAllFilled) return;
+                      setBaseSections(sections);
+                      setValidationAction('inform');
+                      setShowValidationModal(true);
+                    }}
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(59,130,246,0.25)] hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] transition-all active:scale-95"
+                    title="Informar estudio y enviar al supervisor"
+                  >
+                    <Stethoscope size={14} /> Informar
+                  </button>
+                )}
+              </div>
+            </div>
 
               {/* Modal Pendiente de Información */}
               <AnimatePresence>
@@ -2798,6 +2762,193 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
           setShowSnippets(false);
         }}
       />
+
+      {/* ─── Checkpoint de Seguridad IA ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {showValidationModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/85 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 24 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 24 }}
+              transition={{ type: 'spring', damping: 22, stiffness: 300 }}
+              className="w-full max-w-lg bg-[#060912] border border-white/12 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.8)] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="px-7 py-5 border-b border-white/8 bg-gradient-to-r from-violet-500/8 to-transparent flex items-center gap-3">
+                <div className="w-9 h-9 bg-violet-500/20 border border-violet-500/30 rounded-2xl flex items-center justify-center shrink-0">
+                  <AlertCircle size={16} className="text-violet-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black text-white uppercase tracking-widest">
+                    Checkpoint de Seguridad
+                  </h2>
+                  <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                    Revisión obligatoria antes de {validationAction === 'validate' ? 'validar y firmar' : 'informar'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowValidationModal(false)}
+                  className="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="px-7 py-6 space-y-5">
+                {/* Q1: Hallazgos críticos */}
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
+                    1 — ¿Existen hallazgos críticos?
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setCriticalAnswer(true); }}
+                      className={`flex-1 py-3 rounded-2xl text-sm font-black uppercase tracking-widest border transition-all ${
+                        criticalAnswer === true
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.2)]'
+                          : 'bg-white/5 text-slate-400 border-white/10 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30'
+                      }`}
+                    >
+                      Sí — Hallazgo Crítico
+                    </button>
+                    <button
+                      onClick={() => { setCriticalAnswer(false); setCriticalPathology(''); }}
+                      className={`flex-1 py-3 rounded-2xl text-sm font-black uppercase tracking-widest border transition-all ${
+                        criticalAnswer === false
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                          : 'bg-white/5 text-slate-400 border-white/10 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30'
+                      }`}
+                    >
+                      No — Sin hallazgos críticos
+                    </button>
+                  </div>
+
+                  {criticalAnswer === true && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="mt-3"
+                    >
+                      <label className="text-[9px] text-slate-500 uppercase tracking-widest font-black block mb-1.5">
+                        Tipo de hallazgo crítico
+                      </label>
+                      <select
+                        value={criticalPathology}
+                        onChange={e => setCriticalPathology(e.target.value)}
+                        className="w-full bg-rose-500/8 border border-rose-500/30 text-rose-300 text-sm px-4 py-2.5 rounded-xl outline-none focus:border-rose-500/60 transition-colors"
+                      >
+                        <option value="" className="bg-slate-900">Seleccione hallazgo...</option>
+                        <option value="ACV" className="bg-slate-900">ACV / Stroke</option>
+                        <option value="Neumotórax" className="bg-slate-900">Neumotórax</option>
+                        <option value="TEP" className="bg-slate-900">TEP</option>
+                        <option value="Paro Cardíaco" className="bg-slate-900">Paro Cardíaco</option>
+                        <option value="Hemorragia Activa" className="bg-slate-900">Hemorragia Activa</option>
+                        <option value="Fractura Patológica" className="bg-slate-900">Fractura Patológica</option>
+                        <option value="Otro" className="bg-slate-900">Otro crítico</option>
+                      </select>
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Divider */}
+                <div className="h-px bg-white/6" />
+
+                {/* Q2: Guardia IA */}
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
+                    2 — Verificación con Guardia IA
+                  </p>
+                  <label className="flex items-start gap-3.5 cursor-pointer group">
+                    <div className="relative mt-0.5 shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={guardiaIAUsed}
+                        onChange={e => setGuardiaIAUsed(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div
+                        onClick={() => setGuardiaIAUsed(v => !v)}
+                        className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${
+                          guardiaIAUsed
+                            ? 'bg-violet-500 border-violet-500 shadow-[0_0_12px_rgba(139,92,246,0.4)]'
+                            : 'bg-white/5 border-white/20 group-hover:border-violet-500/50'
+                        }`}
+                      >
+                        {guardiaIAUsed && <CheckCircle2 size={11} className="text-white" />}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-200 font-semibold group-hover:text-white transition-colors">
+                        Se utilizó Guardia IA para la detección
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Confirma que el asistente de IA revisó los hallazgos antes de esta firma
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Aviso crítico si aplica */}
+                {criticalAnswer === true && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-start gap-3 p-3.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl"
+                  >
+                    <AlertCircle size={14} className="text-rose-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[11px] font-black text-rose-300 uppercase tracking-wider">
+                        Notificación automática
+                      </p>
+                      <p className="text-[10px] text-rose-400/80 mt-0.5">
+                        Al confirmar, el examen será marcado CRÍTICO y se enviará alerta al centro de referencia.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Footer del modal */}
+              <div className="px-7 pb-6 flex items-center gap-3">
+                <button
+                  onClick={() => setShowValidationModal(false)}
+                  className="flex-1 py-3 rounded-2xl text-sm font-black uppercase tracking-widest text-slate-400 bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  disabled={criticalAnswer === null || (criticalAnswer === true && !criticalPathology)}
+                  onClick={() => {
+                    setShowValidationModal(false);
+                    if (validationAction === 'validate') {
+                      setShowSignModal(true);
+                    } else {
+                      handleUpdateStatus(canSign ? 'REPORTED' : 'PENDING_VALIDATION');
+                    }
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-black uppercase tracking-widest transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+                    validationAction === 'validate'
+                      ? 'text-black bg-[#39FF14] hover:bg-[#4fff30] shadow-[0_0_20px_rgba(57,255,20,0.3)] hover:shadow-[0_0_30px_rgba(57,255,20,0.5)]'
+                      : 'text-white bg-blue-600 hover:bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]'
+                  }`}
+                >
+                  {validationAction === 'validate'
+                    ? <><CheckCircle2 size={15} /> Validar y Firmar</>
+                    : <><Stethoscope size={15} /> Confirmar e Informar</>
+                  }
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
 
       {/* ─── Panel Diccionario de Aprendizaje ─── */}
       <LearningDictionaryPanel
