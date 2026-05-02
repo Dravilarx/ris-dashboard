@@ -96,6 +96,9 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   // ── CHECKPOINT DE SEGURIDAD IA ─────────────────────────────────────────────
   const [showValidationModal, setShowValidationModal] = useState(false);
   const [validationAction, setValidationAction] = useState<'inform' | 'validate' | null>(null);
+  /** Portero Invisible: estado del procesamiento automático antes del modal */
+  const [porteroProcessing, setPorteroProcessing] = useState(false);
+  const [porteroStep, setPorteroStep] = useState<'idle' | 'refining' | 'scanning' | 'done'>('idle');
   const [guardiaIAUsed, setGuardiaIAUsed] = useState(false); // pre-check si ya usó Guardia IA
 
   // ── MÓDULO DOCENTE — SESHAT ────────────────────────────────────────────────
@@ -778,6 +781,88 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
         setIsReviewingAI(false);
      }
   };
+
+  /**
+   * Portero Invisible: ejecuta Gemma 2 + Guardia IA automáticamente en secuencia.
+   * Llamado por [Informar] y [Validar] antes de abrir el modal de confirmación.
+   * Resultado: sections refinadas + aiReviewResults pre-poblado → modal inteligente.
+   */
+  const handlePorteroInvisible = useCallback(async (action: 'inform' | 'validate') => {
+    if (porteroProcessing) return;
+    setPorteroProcessing(true);
+    setPorteroStep('refining');
+
+    try {
+      // ── FASE 1: Refinado con Gemma 2 ──────────────────────────────────────
+      const refined = await ollamaRefine(sections, {
+        modality: study.modality,
+        studyDescription: study.studyDescription,
+        sex: study.sex,
+        age: study.age,
+        activeSection,
+        dictionary: getDictionary(),
+      });
+      if (refined) {
+        setSections(refined.sections);
+        setBaseSections(refined.sections);
+        setIsTextRefined(true);
+        setHighlightColor('text-slate-300');
+      }
+
+      // ── FASE 2: Guardia IA ─────────────────────────────────────────────────
+      setPorteroStep('scanning');
+      const refinedSections = refined?.sections ?? sections;
+      try {
+        const res = await fetch('/api/dictado/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sections: refinedSections,
+            patientMetadata: {
+              sex: study.sex,
+              age: study.age,
+              studyDescription: study.studyDescription,
+              modality: study.modality,
+            },
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAiReviewResults(data);
+          setGuardiaIAUsed(true);
+          // Auto-mark crítico si Guardia detecta alertas
+          if (data.alerts && data.alerts.length > 0) {
+            setCriticalAnswer(true);
+            // Map first alert to the closest critical pathology option
+            const alertText = (data.alerts[0] || '').toLowerCase();
+            if (alertText.includes('acv') || alertText.includes('stroke'))     setCriticalPathology('ACV');
+            else if (alertText.includes('neumotórax') || alertText.includes('neumotorax')) setCriticalPathology('Neumotórax');
+            else if (alertText.includes('tep') || alertText.includes('embol')) setCriticalPathology('TEP');
+            else if (alertText.includes('paro'))                               setCriticalPathology('Paro Cardíaco');
+            else if (alertText.includes('hemorr'))                             setCriticalPathology('Hemorragia Activa');
+            else                                                               setCriticalPathology('Otro');
+          } else {
+            setCriticalAnswer(false);
+          }
+        }
+      } catch (reviewErr) {
+        // Guardia no disponible → continúa de todas formas, sin bloquear el cierre
+        console.warn('[Portero] Guardia IA no disponible, continuando sin escaneo:', reviewErr);
+        setGuardiaIAUsed(false);
+        setCriticalAnswer(false);
+      }
+    } catch (err) {
+      // Gemma no disponible → continúa con el texto tal cual
+      console.warn('[Portero] Refinado no disponible, continuando:', err);
+    } finally {
+      setPorteroStep('done');
+      setPorteroProcessing(false);
+      // Abrir modal con datos ya pre-poblados
+      setValidationAction(action);
+      setShowValidationModal(true);
+    }
+  }, [porteroProcessing, ollamaRefine, sections, study, activeSection, setGuardiaIAUsed]);
 
   const currentModality = study.modality || 'UNKNOWN';
   const filteredTemplates = templates.filter(t => 
@@ -1711,52 +1796,9 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                 >
                   <CheckCircle2 size={14} /> Reset
                 </button>
-                <button
-                  onClick={handleAIReview}
-                  disabled={isReviewingAI}
-                  className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(168,85,247,0.2)] border border-purple-500/30 ${isReviewingAI ? 'bg-purple-900/50 text-purple-300 animate-pulse' : 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'}`}
-                >
-                  {isReviewingAI ? <RotateCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  Guardia IA
-                </button>
+                {/* Guardia IA — movido al Portero Invisible (auto al Informar/Validar) */}
 
-                 {/* ═══ BOTÓN REFINAR INFORME — OLLAMA LOCAL (F4) ═══ */}
-                 <button
-                   id="btn-refinar-informe"
-                   onClick={handleRefineReport}
-                   disabled={isRefining || !Object.values(sections).some(v => v.trim())}
-                   title={`🪄 Refinar con Gemma 2 (Motor AMIS-Voice / M2 Pro) — F4${refineDurationMs ? ` · Última: ${(refineDurationMs/1000).toFixed(1)}s` : ''}${ollamaStatus === 'online' ? ' · GPU Activa' : ''}`}
-                   className={`relative px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest flex items-center gap-2.5 transition-all duration-300 border overflow-hidden ${
-                     isRefining
-                       ? 'bg-gradient-to-r from-violet-900/70 to-fuchsia-900/70 text-white border-violet-500/50 shadow-[0_0_30px_rgba(139,92,246,0.4)] cursor-wait'
-                       : refineState === 'success'
-                       ? 'bg-gradient-to-r from-emerald-900/50 to-teal-900/50 text-emerald-300 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
-                       : refineState === 'error'
-                       ? 'bg-gradient-to-r from-red-900/50 to-rose-900/50 text-red-300 border-red-500/40'
-                       : 'bg-gradient-to-r from-violet-500/15 to-fuchsia-500/15 text-violet-300 border-violet-500/40 hover:from-violet-500/25 hover:to-fuchsia-500/25 hover:shadow-[0_0_25px_rgba(139,92,246,0.3)] hover:border-violet-400/60'
-                   }`}
-                 >
-                   {isRefining && (
-                     <motion.div
-                       className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-                       animate={{ x: ['-100%', '200%'] }}
-                       transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                     />
-                   )}
-                   {isRefining ? (
-                  <Loader2 size={15} className="animate-spin relative z-10" />
-                   ) : refineState === 'success' ? (
-                     <CheckCircle2 size={15} className="relative z-10" />
-                   ) : (
-                     <Wand2 size={15} className="relative z-10" />
-                   )}
-                   <span className="relative z-10">
-                     {isRefining ? 'Gemma 2...' : refineState === 'success' ? 'Refinado ✓' : '🪄 Refinar con Gemma 2'}
-                   </span>
-                   <span className="ml-1 px-1.5 py-0.5 rounded bg-white/10 text-[8px] font-black uppercase tracking-wider text-white/40 relative z-10 hidden lg:inline">
-                     F4
-                   </span>
-                 </button>
+                 {/* Refinar Gemma — movido al Portero Invisible (auto al Informar/Validar). F4 aún disponible como atajo de teclado. */}
 
                 {/* BOTÓN MÓVIL — Sistema de respaldo */}
                 <button
@@ -2079,42 +2121,51 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
 
                 </div>
 
+                {/* ── Indicador Portero Invisible ── */}
+                {porteroProcessing && (
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 border border-violet-500/25 text-violet-300 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                    <Loader2 size={12} className="animate-spin" />
+                    {porteroStep === 'refining' ? 'Refinando con Gemma 2...' : 'Verificando con Guardia IA...'}
+                  </div>
+                )}
+
                 {/* Acción: Pausar Examen */}
                 <button
                   onClick={() => setIsPendingModalOpen(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 hover:bg-amber-500/18 border border-amber-500/25 hover:border-amber-500/40 transition-all"
+                  disabled={porteroProcessing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 hover:bg-amber-500/18 border border-amber-500/25 hover:border-amber-500/40 transition-all disabled:opacity-40"
                 >
                   <Clock size={13} /> Pausar
                 </button>
 
-                {/* Acción primaria: Informar (siempre visible) */}
+                {/* Acción primaria: Informar — activa Portero Invisible */}
                 <button
-                  disabled={!isAllFilled}
-                  onClick={() => {
-                    if (!isAllFilled) return;
-                    setBaseSections(sections);
-                    setValidationAction('inform');
-                    setShowValidationModal(true);
-                  }}
-                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(59,130,246,0.25)] hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] transition-all active:scale-95"
-                  title="Informar estudio (envía a supervisor si eres residente)"
+                  disabled={!isAllFilled || porteroProcessing}
+                  onClick={() => { if (!isAllFilled || porteroProcessing) return; handlePorteroInvisible('inform'); }}
+                  className="relative flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_18px_rgba(59,130,246,0.25)] hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] transition-all active:scale-95 overflow-hidden"
+                  title="Informar estudio — activa refinado Gemma 2 + Guardia IA automáticamente"
                 >
-                  <Stethoscope size={14} /> Informar
+                  {porteroProcessing && validationAction === null && (
+                    <motion.div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent"
+                      animate={{ x: ['-100%', '200%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }} />
+                  )}
+                  {porteroProcessing ? <Loader2 size={14} className="animate-spin relative z-10" /> : <Stethoscope size={14} className="relative z-10" />}
+                  <span className="relative z-10">{porteroProcessing ? (porteroStep === 'refining' ? 'Refinando...' : 'Escaneando...') : 'Informar'}</span>
                 </button>
 
-                {/* Acción Staff: Validar y Firmar (siempre visible, restringido si no es Staff) */}
+                {/* Acción Staff: Validar — activa Portero Invisible */}
                 <button
-                  disabled={!isAllFilled || !canSign}
-                  onClick={() => {
-                    if (!isAllFilled || !canSign) return;
-                    setBaseSections(sections);
-                    setValidationAction('validate');
-                    setShowValidationModal(true);
-                  }}
-                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-black bg-[#39FF14] hover:bg-[#4fff30] disabled:opacity-30 disabled:cursor-not-allowed disabled:grayscale shadow-[0_0_18px_rgba(57,255,20,0.25)] hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] transition-all active:scale-95"
-                  title={!canSign ? 'Solo disponible para Médico Staff — cambia el rol arriba' : 'Validar y Firmar como responsable legal'}
+                  disabled={!isAllFilled || !canSign || porteroProcessing}
+                  onClick={() => { if (!isAllFilled || !canSign || porteroProcessing) return; handlePorteroInvisible('validate'); }}
+                  className="relative flex items-center gap-2 px-5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-black bg-[#39FF14] hover:bg-[#4fff30] disabled:opacity-30 disabled:cursor-not-allowed disabled:grayscale shadow-[0_0_18px_rgba(57,255,20,0.25)] hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] transition-all active:scale-95 overflow-hidden"
+                  title={!canSign ? 'Solo disponible para Médico Staff' : 'Validar — activa refinado Gemma 2 + Guardia IA automáticamente'}
                 >
-                  <CheckCircle2 size={14} /> Validar
+                  {porteroProcessing && (
+                    <motion.div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/10 to-transparent"
+                      animate={{ x: ['-100%', '200%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }} />
+                  )}
+                  {porteroProcessing ? <Loader2 size={14} className="animate-spin relative z-10" /> : <CheckCircle2 size={14} className="relative z-10" />}
+                  <span className="relative z-10">{porteroProcessing ? (porteroStep === 'refining' ? 'Refinando...' : 'Escaneando...') : 'Validar'}</span>
                 </button>
               </div>
             </div>
@@ -2963,6 +3014,29 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                 {/* Divider */}
                 <div className="h-px bg-white/6" />
 
+                {/* Guardia IA auto-result banner */}
+                {aiReviewResults && aiReviewResults.alerts && aiReviewResults.alerts.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-3 p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl"
+                  >
+                    <Sparkles size={14} className="text-rose-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[10px] font-black text-rose-300 uppercase tracking-wider">Guardia IA detectó hallazgos críticos</p>
+                      {aiReviewResults.alerts.map((a: string, i: number) => (
+                        <p key={i} className="text-[10px] text-rose-400/80 mt-1">• {a}</p>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+                {aiReviewResults && (!aiReviewResults.alerts || aiReviewResults.alerts.length === 0) && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/8 border border-emerald-500/20 rounded-xl">
+                    <CheckCircle2 size={12} className="text-emerald-400" />
+                    <p className="text-[10px] text-emerald-400 font-bold">Guardia IA: Sin hallazgos críticos detectados</p>
+                  </div>
+                )}
+
                 {/* Q2: Guardia IA */}
                 <div>
                   <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
@@ -3028,8 +3102,24 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
                 </button>
                 <button
                   disabled={criticalAnswer === null || (criticalAnswer === true && !criticalPathology)}
-                  onClick={() => {
+                  onClick={async () => {
                     setShowValidationModal(false);
+                    // Auto-notificación crítica: dispara inmediatamente sin pasos adicionales
+                    if (criticalAnswer === true && criticalPathology) {
+                      try {
+                        await supabase.from('critical_alerts').insert({
+                          study_uid: study.studyInstanceUID || study.accessionNumber,
+                          accession_number: study.accessionNumber,
+                          pathology: criticalPathology,
+                          modality: study.modality,
+                          detected_by: 'Guardia IA + Médico',
+                          alerted_at: new Date().toISOString(),
+                        });
+                        console.info('[Portero] 🚨 Alerta crítica enviada al centro de referencia:', criticalPathology);
+                      } catch (alertErr) {
+                        console.error('[Portero] Error al registrar alerta crítica:', alertErr);
+                      }
+                    }
                     if (validationAction === 'validate') {
                       setShowSignModal(true);
                     } else {
