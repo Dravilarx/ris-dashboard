@@ -9,7 +9,10 @@ import {
   useReactTable,
   getSortedRowModel,
   getFilteredRowModel,
-  SortingState
+  SortingState,
+  VisibilityState,
+  ColumnSizingState,
+  ColumnResizeMode
 } from '@tanstack/react-table';
 import { 
   ChevronDown, 
@@ -30,7 +33,8 @@ import {
   BarChart2,
   Atom,
   GraduationCap,
-  X
+  X,
+  SlidersHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -71,7 +75,9 @@ function DraggableTableHeader({ header }: { header: any }) {
     transition,
     zIndex: isDragging ? 20 : 0,
     backgroundColor: isDragging ? 'rgba(0,10,20,0.8)' : '',
-    position: 'relative'
+    position: 'relative',
+    width: header.getSize(),
+    minWidth: header.getSize(),
   };
 
   return (
@@ -92,6 +98,17 @@ function DraggableTableHeader({ header }: { header: any }) {
         </div>
         {header.column.getIsSorted() && (header.column.getIsSorted() === 'asc' ? <ChevronUp size={14} className="text-accent" /> : <ChevronDown size={14} className="text-accent" />)}
       </div>
+      {/* Resize handle */}
+      {header.column.getCanResize() && (
+        <div
+          onMouseDown={header.getResizeHandler()}
+          onTouchStart={header.getResizeHandler()}
+          className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none group/resize ${
+            header.column.getIsResizing() ? 'bg-cyan-400/60' : 'bg-transparent hover:bg-cyan-400/30'
+          } transition-colors`}
+          style={{ userSelect: 'none' }}
+        />
+      )}
     </th>
   );
 }
@@ -178,6 +195,28 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [eduExportStudyId, setEduExportStudyId] = useState<number | null>(null);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  
+  // ── Column Visibility & Sizing (with localStorage persistence) ────────────
+  const STORAGE_KEY_VIS = 'amis_col_visibility_v1';
+  const STORAGE_KEY_SZ  = 'amis_col_sizing_v1';
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY_VIS) || '{}'); } catch { return {}; }
+  });
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY_SZ) || '{}'); } catch { return {}; }
+  });
+  const [showColMenu, setShowColMenu] = useState(false);
+  const columnResizeMode: ColumnResizeMode = 'onChange';
+
+  // Persist visibility and sizing whenever they change
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY_VIS, JSON.stringify(columnVisibility)); } catch {}
+  }, [columnVisibility]);
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY_SZ, JSON.stringify(columnSizing)); } catch {}
+  }, [columnSizing]);
   // Estado de disponibilidad del Visor DICOM MedDream
   const [meddreamToast, setMeddreamToast] = useState<'idle' | 'opening' | 'unavailable'>('idle');
   const router = useRouter();
@@ -533,13 +572,17 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
   const table = useReactTable({
     data: sortedData,
     columns,
-    state: { sorting, globalFilter, columnOrder },
+    columnResizeMode,
+    state: { sorting, globalFilter, columnOrder, columnVisibility, columnSizing },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnOrderChange: setColumnOrder,
+    onColumnVisibilityChange: setColumnVisibility,
+    onColumnSizingChange: setColumnSizing,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    enableColumnResizing: true,
   });
 
   return (
@@ -592,6 +635,46 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
             <Layers size={14} /> DIAGNÓSTICO {mode === 'high-contrast' ? 'ON' : 'OFF'}
           </button>
           <div className="h-6 w-[1px] bg-white/10 mx-2" />
+          {/* Column settings button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowColMenu(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+                showColMenu ? 'bg-violet-500/15 text-violet-300 border-violet-500/30' : 'bg-white/5 border-white/5 text-text-muted hover:bg-white/10 hover:text-white'
+              }`}
+              title="Ajustar columnas visibles"
+            >
+              <SlidersHorizontal size={14} /> Columnas
+            </button>
+            {showColMenu && (
+              <div className="absolute right-0 top-full mt-2 z-[200] bg-[#050810] border border-white/10 rounded-2xl shadow-2xl p-3 min-w-[200px] backdrop-blur-xl">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Visibilidad de columnas</p>
+                {table.getAllLeafColumns().map(col => (
+                  <label key={col.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer group">
+                    <div
+                      onClick={() => col.toggleVisibility()}
+                      className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all shrink-0 ${
+                        col.getIsVisible()
+                          ? 'bg-cyan-500 border-cyan-500'
+                          : 'bg-transparent border-white/20 group-hover:border-white/40'
+                      }`}
+                    >
+                      {col.getIsVisible() && <span className="text-black text-[8px] font-black">✓</span>}
+                    </div>
+                    <span className="text-[10px] text-slate-300 font-semibold capitalize">
+                      {typeof col.columnDef.header === 'string' ? col.columnDef.header : col.id}
+                    </span>
+                  </label>
+                ))}
+                <button
+                  onClick={() => { setColumnVisibility({}); setColumnSizing({}); }}
+                  className="mt-2 w-full py-1.5 rounded-lg text-[9px] font-black text-slate-500 hover:text-white hover:bg-white/5 transition-all uppercase tracking-widest"
+                >
+                  Restablecer todo
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex gap-1">
              <button className="p-2 text-text-muted hover:text-white transition-colors"><Activity size={18} /></button>
           </div>

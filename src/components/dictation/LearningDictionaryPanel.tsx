@@ -10,7 +10,7 @@
  * Consumido por: /api/dictado/refine → prompt de Gemma 2
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   BookOpen, Plus, Trash2, X, Search, ArrowRight,
   ChevronDown, ChevronRight, Volume2, Save, AlertCircle
@@ -67,10 +67,11 @@ function saveDictionary(entries: DictionaryEntry[]) {
 interface LearningDictionaryPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  prefillHeard?: string; // Palabra pre-cargada desde selección de texto
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
-export default function LearningDictionaryPanel({ isOpen, onClose }: LearningDictionaryPanelProps) {
+export default function LearningDictionaryPanel({ isOpen, onClose, prefillHeard }: LearningDictionaryPanelProps) {
   const [entries, setEntries] = useState<DictionaryEntry[]>(() => getDictionary());
   const [search, setSearch] = useState('');
   const [showBuiltIn, setShowBuiltIn] = useState(true);
@@ -83,6 +84,14 @@ export default function LearningDictionaryPanel({ isOpen, onClose }: LearningDic
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState('');
   const [justSaved, setJustSaved] = useState(false);
+
+  // Pre-cargar palabra desde selección de texto externa
+  useEffect(() => {
+    if (prefillHeard && isOpen) {
+      setHeard(prefillHeard.trim());
+      setFormError('');
+    }
+  }, [prefillHeard, isOpen]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;

@@ -266,7 +266,33 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [showTemplates, setShowTemplates] = useState(false);
   const [showSnippets, setShowSnippets] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
+  const [dictPrefill, setDictPrefill] = useState('');
   const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── SELECCIÓN → DICCIONARIO ──────────────────────────────────────────────────
+  const [selectionTooltip, setSelectionTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const handleMouseUp = (e: MouseEvent) => {
+      const sel = window.getSelection();
+      const word = sel?.toString().trim();
+      if (!word || word.length < 2 || word.includes('\n')) {
+        setSelectionTooltip(null);
+        return;
+      }
+      // Only inside the editor container
+      const container = editorContainerRef.current;
+      if (!container) { setSelectionTooltip(null); return; }
+      const range = sel?.getRangeAt(0);
+      const rangeRect = range?.getBoundingClientRect();
+      if (!rangeRect) { setSelectionTooltip(null); return; }
+      // Check if selection is inside our editor
+      if (!container.contains(sel?.anchorNode ?? null)) { setSelectionTooltip(null); return; }
+      setSelectionTooltip({ text: word, x: rangeRect.left + rangeRect.width / 2, y: rangeRect.top - 8 });
+    };
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, []);
 
   // ── SLASH COMMAND STATE (/snippet fuzzy menu) ──────────────────────────────
   const [slashOpen, setSlashOpen] = useState(false);
@@ -2964,10 +2990,37 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       </AnimatePresence>
 
 
+      {/* ─── Tooltip Flotante: Selección → Diccionario ─────────────────────────── */}
+      <AnimatePresence>
+        {selectionTooltip && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 4 }}
+            transition={{ duration: 0.12 }}
+            onClick={() => {
+              setDictPrefill(selectionTooltip.text);
+              setShowDictionary(true);
+              setSelectionTooltip(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            className="fixed z-[300] flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-black uppercase tracking-widest shadow-[0_4px_20px_rgba(139,92,246,0.5)] transition-colors"
+            style={{
+              left: selectionTooltip.x,
+              top: selectionTooltip.y,
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            ➕ Entrenar palabra
+          </motion.button>
+        )}
+      </AnimatePresence>
+
       {/* ─── Panel Diccionario de Aprendizaje ─── */}
       <LearningDictionaryPanel
         isOpen={showDictionary}
-        onClose={() => setShowDictionary(false)}
+        onClose={() => { setShowDictionary(false); setDictPrefill(''); }}
+        prefillHeard={dictPrefill}
       />
 
     </motion.div>

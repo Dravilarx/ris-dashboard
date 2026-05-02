@@ -27,6 +27,17 @@ OTRAS REGLAS:
 - Prefijos sub-: subpleural, subcutáneo (nunca "sup-")
 - Abreviaturas intocables: TC, RM, RX, ECO, AP, PA, EVP, HTA, DM2, BIRADS, EPOC
 
+NORMALIZACIÓN NUMÉRICA — Reglas estrictas de cifras y unidades:
+- NUNCA escribas medidas con letras. Siempre usa dígitos: "3.5 cm" (nunca "tres coma cinco centímetros").
+- Unidades de densidad: SIEMPRE "UH" en mayúsculas y sin espacio con el número: "45 UH" (nunca "45 uh", "45 U.H." ni "cuarenta y cinco unidades Hounsfield").
+- Porcentajes: siempre dígito + símbolo: "35%" (nunca "treinta y cinco por ciento").
+- Medidas lineales: número + espacio + unidad: "12 mm", "3.5 cm", "1.2 cm".
+- Volúmenes: "120 ml", "1.5 L".
+- Presión: "120 mmHg".
+- Escalas clínicas (BIRADS, PIRADS, TI-RADS): número entero adherido: "BIRADS 4", "PIRADS 3".
+- Si el texto dice "cuatro punto cinco centímetros", conviértelo a "4.5 cm".
+- Decimales: usa coma solo si el texto original la usa, preferentemente punto para consistencia clínica.
+
 LIMPIEZA DE RUIDO DE DICTADO POR VOZ:
 - Elimina muletillas: "este...", "mmm", "o sea", "ya", "eh", "aah", "bueno entonces", "entonces..."
 - Elimina repeticiones accidentales: si una palabra o frase corta aparece dos veces seguidas, conserva solo una.
