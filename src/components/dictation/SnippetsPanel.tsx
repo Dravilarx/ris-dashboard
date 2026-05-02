@@ -14,6 +14,7 @@ export interface Snippet {
   category: string;
   isPinned?: boolean;
   isCustom?: boolean;
+  isFavorite?: boolean; // Estrella de favorito — visible en menú /
 }
 
 interface SnippetsPanelProps {
@@ -67,6 +68,20 @@ export default function SnippetsPanel({ onInsert, isOpen, onClose }: SnippetsPan
     if (typeof window === 'undefined') return new Set();
     try { return new Set(JSON.parse(localStorage.getItem('amis_hidden_snippets') || '[]')); } catch { return new Set(); }
   });
+  // IDs de snippets marcados como favoritos
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem('amis_favorite_snippets') || '[]')); } catch { return new Set(); }
+  });
+
+  const toggleFavorite = useCallback((id: string) => {
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem('amis_favorite_snippets', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
 
   // CRUD state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -352,6 +367,18 @@ export default function SnippetsPanel({ onInsert, isOpen, onClose }: SnippetsPan
                       </div>
                       {/* Botones de acción — SIEMPRE VISIBLES */}
                       <div className="flex items-center gap-0.5 shrink-0 ml-1">
+                        {/* ⭐ Favorito */}
+                        <button
+                          onClick={e => { e.stopPropagation(); toggleFavorite(snippet.id); }}
+                          title={favoriteIds.has(snippet.id) ? 'Quitar de favoritos' : 'Marcar como favorito'}
+                          className={`p-1.5 rounded-lg transition-all ${
+                            favoriteIds.has(snippet.id)
+                              ? 'text-amber-400 bg-amber-400/10'
+                              : 'text-slate-600 hover:text-amber-400 hover:bg-amber-400/8'
+                          }`}
+                        >
+                          <Star size={11} fill={favoriteIds.has(snippet.id) ? 'currentColor' : 'none'} />
+                        </button>
                         {snippet.isCustom ? (
                           <>
                             <button onClick={e => { e.stopPropagation(); startEdit(snippet); }} className="p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-400/10 transition-all" title="Editar snippet">

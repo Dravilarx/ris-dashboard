@@ -343,12 +343,14 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [slashSection, setSlashSection] = useState<'technique' | 'history' | 'findings' | 'impression'>('findings');
   const [slashAnchorRect, setSlashAnchorRect] = useState<DOMRect | undefined>();
 
-  /** Mapea campo del informe → categorías de snippets relevantes */
+  /** Mapea campo del informe → categorías estrictas de snippets.
+   *  'history' SOLO muestra 'Antecedentes'. 'findings' incluye ambos tipos de hallazgos.
+   *  Los favoritos del contexto siempre aparecen primero (lógica en SlashCommandMenu). */
   const SECTION_CATEGORIES: Record<string, string[]> = {
-    technique: ['Técnicas', 'Favoritos'],
-    history:   ['Antecedentes', 'Favoritos'],
-    findings:  ['Hallazgos Normales', 'Hallazgos Comunes', 'Favoritos'],
-    impression:['Impresiones', 'Favoritos'],
+    technique: ['Técnicas'],
+    history:   ['Antecedentes'],
+    findings:  ['Hallazgos Normales', 'Hallazgos Comunes'],
+    impression:['Impresiones'],
   };
 
   /** Etiqueta legible del campo activo para el menú */
@@ -364,9 +366,15 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
       if (typeof window === 'undefined') return [];
       try { return JSON.parse(localStorage.getItem('amis_custom_snippets') || '[]'); } catch { return []; }
     })();
-    return [...DEFAULT_SNIPPETS, ...custom];
+    // Lee favoritos del localStorage para enriquecer cada snippet
+    const favIds: Set<string> = (() => {
+      if (typeof window === 'undefined') return new Set();
+      try { return new Set(JSON.parse(localStorage.getItem('amis_favorite_snippets') || '[]')); } catch { return new Set(); }
+    })();
+    const all = [...DEFAULT_SNIPPETS, ...custom];
+    return all.map(s => ({ ...s, isFavorite: favIds.has(s.id) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [showSnippets]); // re-derive when panel closes (user may have changed favorites)
 
   /** onChange para los 4 textareas — detecta el comando '/' y activa el menú */
   const handleSectionChange = useCallback((

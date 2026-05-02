@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Command, CornerDownLeft, Hash } from 'lucide-react';
+import { Command, CornerDownLeft, Hash, Star } from 'lucide-react';
 import type { Snippet } from './SnippetsPanel';
 
 interface SlashCommandMenuProps {
@@ -81,23 +81,32 @@ export default function SlashCommandMenu({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
 
-  // ── Context filter then fuzzy score ──────────────────────────────────────
+  // ── Context filter + favorites-first sort + fuzzy score ──────────────────
   const filtered = useMemo(() => {
-    // Step 1: restrict to section context (if provided)
+    // Step 1: restrict to section context
     const inContext = sectionCategories && sectionCategories.length > 0
       ? snippets.filter(s => sectionCategories.includes(s.category))
       : snippets;
 
-    // Step 2: fuzzy query within context
-    const pool = inContext.length > 0 ? inContext : snippets; // fallback to all if context empty
-    if (!query) return pool.slice(0, 8);
+    const pool = inContext.length > 0 ? inContext : snippets;
 
-    return pool
-      .map(s => ({ snippet: s, score: fuzzyScore(s, query) }))
-      .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map(x => x.snippet)
-      .slice(0, 8);
+    // Step 2: fuzzy filter
+    let results: Snippet[];
+    if (!query) {
+      results = pool.slice(0, 10);
+    } else {
+      results = pool
+        .map(s => ({ snippet: s, score: fuzzyScore(s, query) }))
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(x => x.snippet)
+        .slice(0, 10);
+    }
+
+    // Step 3: favorites bubble to top
+    const favs    = results.filter(s => s.isFavorite);
+    const nonFavs = results.filter(s => !s.isFavorite);
+    return [...favs, ...nonFavs].slice(0, 8);
   }, [query, snippets, sectionCategories]);
 
   const isContextFiltered = !!(sectionCategories && sectionCategories.length > 0);
@@ -171,14 +180,14 @@ export default function SlashCommandMenu({
           <div className="w-5 h-5 bg-cyan-500/20 border border-cyan-500/30 rounded-lg flex items-center justify-center">
             <Command size={10} className="text-cyan-400" />
           </div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-            {isContextFiltered && sectionLabel ? sectionLabel : 'Snippets Clínicos'}
-          </span>
-          {isContextFiltered && !query && (
-            <span className="px-2 py-0.5 bg-white/5 text-slate-500 text-[9px] font-black rounded-full border border-white/10">
-              contexto
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {isContextFiltered && sectionLabel ? `Contexto: ${sectionLabel}` : 'Snippets Clínicos'}
             </span>
-          )}
+            {isContextFiltered && filtered.some(s => s.isFavorite) && (
+              <span className="text-[8px] text-amber-400/70 font-medium">⭐ Favoritos primero</span>
+            )}
+          </div>
           {query && (
             <span className="px-2 py-0.5 bg-cyan-500/15 text-cyan-300 text-[10px] font-black rounded-full border border-cyan-500/25 font-mono">
               /{query}
@@ -231,6 +240,9 @@ export default function SlashCommandMenu({
               {/* Center: title + preview */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                  {snippet.isFavorite && (
+                    <span title="Favorito" className="text-amber-400"><Star size={9} fill="currentColor" /></span>
+                  )}
                   <span className={`text-[12px] font-bold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
                     {snippet.title}
                   </span>
