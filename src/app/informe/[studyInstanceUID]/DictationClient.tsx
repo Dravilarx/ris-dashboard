@@ -269,20 +269,36 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
   const [dictPrefill, setDictPrefill] = useState('');
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── SELECCIÓN → DICCIONARIO (abre el panel directamente) ──────────────────
-  // window.getSelection() no funciona en <textarea>; usamos selectionStart/End.
+  // ── SELECCIÓN → DICCIONARIO (botón flotante no invasivo) ──────────────────
+  // window.getSelection() no funciona en <textarea>.
+  // Usamos selectionStart/End + posición del mouse para el botón flotante.
+  const [selectionTooltip, setSelectionTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+
   const handleEditorMouseUp = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLTextAreaElement;
-    if (target.tagName !== 'TEXTAREA') return;
+    if (target.tagName !== 'TEXTAREA') { setSelectionTooltip(null); return; }
     const start = target.selectionStart;
     const end   = target.selectionEnd;
-    if (start == null || end == null || start === end) return;
+    if (start == null || end == null || start === end) { setSelectionTooltip(null); return; }
     const selected = target.value.substring(start, end).trim();
-    if (!selected || selected.length < 2 || selected.includes('\n')) return;
-    // Abre el diccionario inmediatamente con la palabra pre-cargada
-    setDictPrefill(selected);
-    setShowDictionary(true);
+    if (!selected || selected.length < 2 || selected.includes('\n')) { setSelectionTooltip(null); return; }
+    // Mostrar botón flotante en la posición del mouse
+    setSelectionTooltip({ text: selected, x: e.clientX, y: e.clientY });
   }, []);
+
+  // Cerrar el botón flotante al hacer click fuera o presionar Escape
+  useEffect(() => {
+    if (!selectionTooltip) return;
+    const dismiss = () => setSelectionTooltip(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
+    // mousedown (no mouseup) para no interferir con el mouseup del editor
+    document.addEventListener('mousedown', dismiss, { once: true });
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', dismiss);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [selectionTooltip]);
 
   // ── SLASH COMMAND STATE (/snippet fuzzy menu) ──────────────────────────────
   const [slashOpen, setSlashOpen] = useState(false);
@@ -2976,6 +2992,36 @@ export default function DictationClient({ study, annexes }: { study: EnrichedStu
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Botón flotante: Selección → Diccionario ───────────────────────────
+           Aparece al seleccionar texto en el editor. Desaparece al ignorarlo.
+           Solo abre el Diccionario si el usuario lo pulsa explícitamente. */}
+      <AnimatePresence>
+        {selectionTooltip && (
+          <motion.button
+            key="dict-tooltip"
+            initial={{ opacity: 0, scale: 0.85, y: 6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 6 }}
+            transition={{ duration: 0.14, ease: 'easeOut' }}
+            onMouseDown={e => {
+              // Prevent the document mousedown dismiss from firing before our click
+              e.stopPropagation();
+              setDictPrefill(selectionTooltip.text);
+              setShowDictionary(true);
+              setSelectionTooltip(null);
+            }}
+            className="fixed z-[300] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/95 hover:bg-violet-500 text-white text-[10px] font-black uppercase tracking-widest shadow-[0_4px_24px_rgba(139,92,246,0.55)] backdrop-blur-sm border border-violet-400/30 cursor-pointer select-none"
+            style={{
+              left: selectionTooltip.x,
+              top: selectionTooltip.y - 44,
+              transform: 'translateX(-50%)',
+            }}
+          >
+            📖 Entrenar en diccionario
+          </motion.button>
         )}
       </AnimatePresence>
 
