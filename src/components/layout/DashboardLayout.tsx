@@ -129,7 +129,7 @@ const SidebarDivider = ({ label, isCollapsed }: { label: string; isCollapsed: bo
 interface DashboardLayoutProps {
   children: React.ReactNode;
   /** Forzar qué item del sidebar aparece activo. Si no se pasa, se usa pathname. */
-  activeView?: 'worklist' | 'dashboard';
+  activeView?: 'worklist' | 'dashboard' | 'estadisticas';
 }
 
 export default function DashboardLayout({ children, activeView }: DashboardLayoutProps) {
