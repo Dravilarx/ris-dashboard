@@ -388,6 +388,64 @@ export async function searchStudies(
   return rows.map(mapRowToSearchResult);
 }
 
+// =====================================================================
+// LANZAMIENTO DE VISOR MEDDREAM
+// =====================================================================
+
+export interface MeddreamLaunchInfo {
+  institutionId: number;
+  studyInstanceUID: string;
+  aetitle: string;
+  urlToken: string;
+  method: string;
+  json: string;
+  urlVisor: string;
+}
+
+/**
+ * getMeddreamLaunchInfo — Obtiene la configuración necesaria para abrir
+ * MedDream (visor DICOM, id_visor = 2) para un estudio dado.
+ *
+ * Equivale a:
+ *   SELECT TOP 10 e.id_institucion, e.codexamen, e.aetitle,
+ *                 'http://190.196.143.123:8090/v1/generate' AS urlToken,
+ *                 m.method, m.json, iv.url AS urlVisor
+ *   FROM ris_examen e
+ *   INNER JOIN meddreams m            ON m.id_institucion  = e.id_institucion
+ *   INNER JOIN institucion_visor iv   ON iv.id_institucion = e.id_institucion
+ *   WHERE iv.id_visor = 2
+ *     AND e.codexamen = @codExamen;
+ */
+export async function getMeddreamLaunchInfo(
+  codExamen: string
+): Promise<MeddreamLaunchInfo[]> {
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT TOP 10
+      e.id_institucion,
+      e.codexamen,
+      e.aetitle,
+      'http://190.196.143.123:8090/v1/generate' AS urlToken,
+      m.method,
+      m.json,
+      iv.url AS urlVisor
+    FROM ris_examen e
+    INNER JOIN meddreams m          ON m.id_institucion  = e.id_institucion
+    INNER JOIN institucion_visor iv ON iv.id_institucion = e.id_institucion
+    WHERE iv.id_visor = 2
+      AND e.codexamen = ${codExamen}
+  `;
+
+  return rows.map((row) => ({
+    institutionId:    Number(row.id_institucion ?? 0),
+    studyInstanceUID: String(row.codexamen ?? ""),
+    aetitle:          String(row.aetitle ?? ""),
+    urlToken:         String(row.urlToken ?? ""),
+    method:           String(row.method ?? ""),
+    json:             String(row.json ?? ""),
+    urlVisor:         String(row.urlVisor ?? ""),
+  }));
+}
+
 /**
  * getExamStatuses — Catálogo de estados de examen
  */

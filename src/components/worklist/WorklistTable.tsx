@@ -378,36 +378,49 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
     }
   };
 
-  const handleStartDiagnosis = () => {
+  const handleStartDiagnosis = async () => {
     const study = data?.find(s => s.id === selectedId);
     if (!study) return;
 
-    // ─── VISOR DICOM (MedDream) ──────────────────────────────────────────────
-    // Intentar abrir MedDream en Monitor 2. Si no está disponible (puerto 8080
-    // sin servidor), el popup simplemente fallará — NO bloqueamos la navegación.
     const studyUID = study.studyInstanceUID || study.accessionNumber;
-    const meddreamUrl = `http://localhost:8080/meddream/?study=${studyUID}`;
-    console.log(`[MedDream] Intentando abrir visor DICOM: ${meddreamUrl}`);
-
     setMeddreamToast('opening');
 
-    // Intentar detectar si MedDream responde antes de abrir la ventana
-    fetch('http://localhost:8080/', { mode: 'no-cors', signal: AbortSignal.timeout(2000) })
-      .then(() => {
-        // MedDream parece disponible — abrir en Monitor 2
-        const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
-        window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
-        setMeddreamToast('idle');
-      })
-      .catch(() => {
-        // MedDream no disponible — notificar pero continuar al informe
-        console.warn('[MedDream] Visor DICOM no disponible en localhost:8080');
+    // ─── VISOR DICOM (MedDream) ──────────────────────────────────────────────
+    // Pedimos al backend la config + token del visor (id_visor = 2).
+    // Si falla, continuamos al informe sin bloquear al radiólogo.
+    try {
+      const res = await fetch(
+        `/api/meddream/launch?studyUID=${encodeURIComponent(studyUID)}`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const { urlVisor, token } = (await res.json()) as {
+        urlVisor?: string;
+        token?: string;
+      };
+
+      if (!urlVisor) {
+        console.warn('[MedDream] Sin urlVisor para', studyUID);
         setMeddreamToast('unavailable');
         setTimeout(() => setMeddreamToast('idle'), 5000);
-      });
+      } else {
+        const params = new URLSearchParams({ study: studyUID });
+        if (token) params.set('token', token);
+        const sep = urlVisor.includes('?') ? '&' : '?';
+        const meddreamUrl = `${urlVisor}${sep}${params.toString()}`;
+        const windowFeatures = 'menubar=no,location=no,resizable=yes,scrollbars=yes,status=no,width=1920,height=1080';
+        console.log('[MedDream] Abriendo visor DICOM:', meddreamUrl);
+        window.open(meddreamUrl, 'MedDream_Monitor2', windowFeatures);
+        setMeddreamToast('idle');
+      }
+    } catch (err) {
+      console.warn('[MedDream] Error obteniendo config del visor:', err);
+      setMeddreamToast('unavailable');
+      setTimeout(() => setMeddreamToast('idle'), 5000);
+    }
 
     // Siempre navegar al panel de informe (Monitor 1)
-    // No esperar MedDream para no bloquear el flujo del radiólogo
     if (study.studyInstanceUID) {
       router.push(`/informe/${study.studyInstanceUID}`);
     } else {

@@ -10,8 +10,8 @@ function createPrismaClient() {
     server: process.env.DB_HOST || "190.196.143.123",
     port: parseInt(process.env.DB_PORT || "1433"),
     database: process.env.DB_NAME || "DBMULTIRISQA",
-    user: process.env.DB_USER || "Mavila",
-    password: process.env.DB_PASSWORD || "",
+    user: process.env.DB_USER || "sa",
+    password: process.env.DB_PASSWORD || ".R1spAc52020.",
     options: {
       encrypt: true,
       trustServerCertificate: true,
