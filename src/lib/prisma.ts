@@ -5,13 +5,23 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `[prisma] Falta la variable de entorno ${name}. Configurala en .env (no hay valores por defecto).`
+    );
+  }
+  return value;
+}
+
 function createPrismaClient() {
   const adapter = new PrismaMssql({
-    server: process.env.DB_HOST || "190.196.143.123",
+    server: requireEnv("DB_HOST"),
     port: parseInt(process.env.DB_PORT || "1433"),
-    database: process.env.DB_NAME || "DBMULTIRISQA",
-    user: process.env.DB_USER || "Mavila",
-    password: process.env.DB_PASSWORD || "",
+    database: requireEnv("DB_NAME"),
+    user: requireEnv("DB_USER"),
+    password: requireEnv("DB_PASSWORD"),
     options: {
       encrypt: true,
       trustServerCertificate: true,
@@ -20,10 +30,7 @@ function createPrismaClient() {
 
   return new PrismaClient({
     adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["error", "warn"]
-        : ["error"],
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 }
 
@@ -33,5 +40,5 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
 
-// ⚠️ IMPORTANTE: Este cliente es EXCLUSIVAMENTE de lectura.
-// No ejecutar create/update/delete contra la DB legacy.
+// IMPORTANTE: Este cliente es EXCLUSIVAMENTE de lectura.
+// No ejecutar create/update/delete contra la base de Multiris.
