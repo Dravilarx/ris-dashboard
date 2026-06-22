@@ -6,7 +6,7 @@ import type { PaginatedResult, EnrichedStudy, PatientIdSource, B2BCenterIdentity
  * Cache En Memoria de los mapeos de AMIS 3.0
  */
 let mappingCache: {
-  doctors: Record<number, string>;
+  doctors: Record<string, string>;
   institutions: Record<number, { id: string, name: string }>;
   slas: Record<string, Record<string, Record<string, number>>>; // [institutionUuid][category][modality] = minutes
   /** Identidad Adaptativa: configuración por legacy_institution_id */
@@ -44,7 +44,7 @@ async function fetchMappingsFromAmis3() {
 
     // Consultas reales a AMIS 3.0
     const fetchPromises = Promise.all([
-      supabase.from("ris_doctor_mapping").select("legacy_id, nombre_completo"),
+      supabase.from("ris_doctor_mapping").select("username, nombre_completo"),
       supabase.from("ris_institution_mapping").select("legacy_id, id, nombre_comercial"),
       supabase.from("ris_sla_rules").select("institution_id, category, modality, sla_minutes"),
       supabase.from("b2b_centers").select("id, legacy_institution_id, center_name, patient_id_source, patient_id_label").eq("is_active", true),
@@ -52,9 +52,9 @@ async function fetchMappingsFromAmis3() {
 
     const [docsRes, instRes, slaRes, centersRes] = await withTimeout(fetchPromises, SUPABASE_TIMEOUT_MS);
 
-    const doctors: Record<number, string> = {};
+    const doctors: Record<string, string> = {};
     if (docsRes?.data) {
-      docsRes.data.forEach((d) => { doctors[d.legacy_id] = d.nombre_completo; });
+      docsRes.data.forEach((d) => { doctors[d.username] = d.nombre_completo; });
     }
 
     const institutions: Record<number, {id: string, name: string}> = {};
@@ -200,8 +200,7 @@ export async function fetchEnrichedWorklist(
     const instMapping = mappings.institutions[study.institutionId];
     const realInstitution = instMapping?.name || study.institutionName || 'Institucion Desconocida';
 
-    const docId = study.radiologistUsername ? 1 : 1;
-    const mappedDoctor = mappings.doctors[docId];
+    const mappedDoctor = study.radiologistUsername ? mappings.doctors[study.radiologistUsername] : undefined;
     const realDoctor = mappedDoctor
       ? `Dr/a. ${mappedDoctor}`
       : (study.radiologistUsername ? `Staff (${study.radiologistUsername})` : 'NO ASIGNADO');
@@ -281,8 +280,7 @@ export async function getEnrichedStudyByUID(
   const instMapping = mappings.institutions[study.institutionId];
   const realInstitution = instMapping?.name || study.institutionName || 'Institución Desconocida';
   
-  const docId = study.radiologistUsername ? 1 : 1; 
-  const mappedDoctor = mappings.doctors[docId];
+  const mappedDoctor = study.radiologistUsername ? mappings.doctors[study.radiologistUsername] : undefined;
   const realDoctor = mappedDoctor 
     ? `Dr/a. ${mappedDoctor}` 
     : (study.radiologistUsername ? `Staff (${study.radiologistUsername})` : 'NO ASIGNADO');
