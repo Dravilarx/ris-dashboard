@@ -65,6 +65,13 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function formatSafeTime(value: unknown): string {
+  const d = new Date(value as string);
+  return isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+}
+
 function DraggableTableHeader({ header }: { header: any }) {
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } =
     useSortable({ id: header.column.id });
@@ -118,7 +125,8 @@ const calculateElapsed = (studyDate: Date) => {
   // FIX QA: Usa fecha ficticia para simular que todos los estudios históricos sucedieron "Hoy"
   const now = new Date();
   const originalDate = new Date(studyDate);
-  
+  if (isNaN(originalDate.getTime())) return 0;
+
   const fictitiousDbDate = new Date();
   fictitiousDbDate.setHours(originalDate.getHours(), originalDate.getMinutes(), 0, 0);
 
@@ -501,7 +509,7 @@ export default function WorklistTable({ data }: { data: EnrichedStudy[] }) {
             HOY
           </span>
           <span className="text-[10px] font-mono text-text-muted">
-            {new Date(info.getValue()).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+            {formatSafeTime(info.getValue())}
           </span>
         </div>
       ),
