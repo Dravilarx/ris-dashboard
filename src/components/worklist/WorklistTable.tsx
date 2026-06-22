@@ -121,22 +121,27 @@ function DraggableTableHeader({ header }: { header: any }) {
 }
 
 /** SLA Indicator Component with Traffic Light Logic */
+// Interruptor: con NEXT_PUBLIC_SLA_DEMO=true finge que los examenes son de hoy (util en la base de prueba estatica).
+// Sin la variable (o en false), el tiempo es REAL — para produccion.
+const SLA_DEMO_MODE = process.env.NEXT_PUBLIC_SLA_DEMO === 'true';
+
 const calculateElapsed = (studyDate: Date) => {
-  // FIX QA: Usa fecha ficticia para simular que todos los estudios históricos sucedieron "Hoy"
   const now = new Date();
   const originalDate = new Date(studyDate);
   if (isNaN(originalDate.getTime())) return 0;
 
-  const fictitiousDbDate = new Date();
-  fictitiousDbDate.setHours(originalDate.getHours(), originalDate.getMinutes(), 0, 0);
-
-  // Si la hora original es mayor a la hora actual (ej. estudio 23:00, pero son las 10:00),
-  // restamos 1 día para que el tiempo sea positivo y realista.
-  if (fictitiousDbDate.getTime() > now.getTime()) {
-    fictitiousDbDate.setDate(fictitiousDbDate.getDate() - 1);
+  if (SLA_DEMO_MODE) {
+    // MODO DEMO: simula que el examen fue hoy
+    const fictitiousDbDate = new Date();
+    fictitiousDbDate.setHours(originalDate.getHours(), originalDate.getMinutes(), 0, 0);
+    if (fictitiousDbDate.getTime() > now.getTime()) {
+      fictitiousDbDate.setDate(fictitiousDbDate.getDate() - 1);
+    }
+    return Math.floor(Math.abs(now.getTime() - fictitiousDbDate.getTime()) / 60000);
   }
 
-  return Math.floor(Math.abs(now.getTime() - fictitiousDbDate.getTime()) / 60000);
+  // MODO REAL: minutos desde la fecha real del examen hasta ahora
+  return Math.floor(Math.max(0, now.getTime() - originalDate.getTime()) / 60000);
 };
 
 const SLABadge: React.FC<{ 

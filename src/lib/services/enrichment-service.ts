@@ -15,6 +15,13 @@ let mappingCache: {
 } | null = null;
 
 const CACHE_TTL_MS = 1000 * 60 * 5; // 5 Minutos
+// Tiempos de SLA por defecto (minutos), por categoria clinica.
+// Se usan solo cuando no hay una regla especifica en ris_sla_rules.
+const DEFAULT_SLA_MINUTES: Record<string, number> = {
+  Urgencia: 60,
+  Hospitalizado: 240,
+  Ambulatorio: 1440,
+};
 const SUPABASE_TIMEOUT_MS = 1500; // 1.5s max para esperar Supabase, luego fallback VPN (Efecto de Carga Progresiva)
 
 /**
@@ -207,7 +214,7 @@ export async function fetchEnrichedWorklist(
 
     const category = normalizeCategory(study.urgencyType || '');
     const modality = study.modality || 'RX';
-    let expectedMins = 60;
+    let expectedMins = DEFAULT_SLA_MINUTES[category] ?? 240;
 
     if (instMapping?.id && mappings.slas[instMapping.id]) {
       const instSlas = mappings.slas[instMapping.id];
@@ -287,7 +294,7 @@ export async function getEnrichedStudyByUID(
 
   const category = normalizeCategory(study.urgencyType || "");
   const modality = study.modality || "RX";
-  let expectedMins = 60;
+  let expectedMins = DEFAULT_SLA_MINUTES[category] ?? 240;
 
   if (instMapping?.id && mappings.slas[instMapping.id]) {
     const instSlas = mappings.slas[instMapping.id];
