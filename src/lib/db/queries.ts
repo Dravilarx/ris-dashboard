@@ -108,35 +108,24 @@ export async function getWorklist(
   // ===================================================================
   if (filters.q && filters.q.trim().length >= 2) {
     const raw = filters.q.trim();
-    const searchLike = `%${raw}%`;
-    const startLike  = `${raw}%`;
+    const prefixLike = `${raw}%`; // Prefijo: usa indices, evita escanear toda la tabla
 
-    const countResult = await prisma.$queryRaw<{ total: number }[]>`
-      SELECT COUNT(*) AS total FROM View_Busqueda_Examen
-      WHERE (
-        nombre          LIKE ${searchLike}
-        OR apellidopaterno LIKE ${searchLike}
-        OR apellidomaterno LIKE ${searchLike}
-        OR idpaciente      LIKE ${startLike}
-        OR numeroacceso    LIKE ${startLike}
-      )
-    `;
-    const searchTotal = Number(countResult[0]?.total ?? 0);
-
+    // Una sola pasada: COUNT(*) OVER() trae el total junto con la pagina
     const searchRows = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT *
+      SELECT *, COUNT(*) OVER() AS _total_count
       FROM View_Busqueda_Examen
       WHERE (
-        nombre          LIKE ${searchLike}
-        OR apellidopaterno LIKE ${searchLike}
-        OR apellidomaterno LIKE ${searchLike}
-        OR idpaciente      LIKE ${startLike}
-        OR numeroacceso    LIKE ${startLike}
+        nombre             LIKE ${prefixLike}
+        OR apellidopaterno LIKE ${prefixLike}
+        OR apellidomaterno LIKE ${prefixLike}
+        OR idpaciente      LIKE ${prefixLike}
+        OR numeroacceso    LIKE ${prefixLike}
       )
       ORDER BY fechaexamen DESC
       OFFSET ${Prisma.raw(String(offset))} ROWS
       FETCH NEXT ${Prisma.raw(String(safePageSize))} ROWS ONLY
     `);
+    const searchTotal = Number(searchRows[0]?._total_count ?? 0);
 
     return {
       data: searchRows.map(mapRowToStudy),
@@ -354,7 +343,6 @@ export async function searchStudies(
 
   let rows: Record<string, unknown>[];
   const searchLike = `${cleanQuery}%`;
-  const searchContains = `%${cleanQuery}%`;
 
   if (isRUT) {
     rows = await prisma.$queryRaw<Record<string, unknown>[]>`
@@ -380,7 +368,7 @@ export async function searchStudies(
         id_ris_examen, idpaciente, nombreFull, numeroacceso,
         modalidad, fechaexamen, institucion, nombre_estado_examen
       FROM View_Busqueda_Examen
-      WHERE nombre LIKE ${searchContains} OR apellidopaterno LIKE ${searchContains}
+      WHERE nombre LIKE ${searchLike} OR apellidopaterno LIKE ${searchLike}
       ORDER BY fechaexamen DESC
     `;
   }
